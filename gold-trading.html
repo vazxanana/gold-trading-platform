@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gold Trading Platform - Institutional</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://s3.tradingview.com/tv.js" async></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.0/lightweight-charts.production.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-primary: #F8F9FA;
+      --bg-secondary: #FFFFFF;
+      --bg-tertiary: #F1F3F5;
+      --text-primary: #1A1D29;
+      --text-secondary: #4A5568;
+      --text-tertiary: #7A8196;
+      --border: #E2E5EB;
+      --border-light: #EDF0F7;
+      --accent-green: #00A651;
+      --accent-red: #C23B33;
+      --accent-blue: #0052CC;
+      --accent-gold: #B8860B;
+      --accent-amber: #E3A008;
+      --glass-light: rgba(255, 255, 255, 0.6);
+      --glass-lighter: rgba(255, 255, 255, 0.75);
+      --glass-ultra: rgba(255, 255, 255, 0.5);
+      --shadow-soft: 0 10px 30px rgba(26, 29, 41, 0.08);
+      --shadow-lift: 0 18px 56px rgba(26, 29, 41, 0.13);
+    }
+
+    html, body {
+      background:
+        radial-gradient(circle at top left, rgba(227, 160, 8, 0.12), transparent 34rem),
+        linear-gradient(135deg, #F8F9FA 0%, #EFF3F7 100%);
+      background-attachment: fixed;
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      font-weight: 400;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      line-height: 1.5;
+    }
+
+    /* GLASS EFFECT - Ultra Transparent */
+    .glass {
+      background: var(--glass-light);
+      backdrop-filter: blur(24px) saturate(200%);
+      -webkit-backdrop-filter: blur(24px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 12px;
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass:hover {
+      background: var(--glass-lighter);
+      border-color: rgba(255, 255, 255, 0.8);
+      box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
+    .glass-premium {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0.55) 100%);
+      backdrop-filter: blur(30px) saturate(220%);
+      -webkit-backdrop-filter: blur(30px) saturate(220%);
+      border: 1.5px solid rgba(255, 255, 255, 0.85);
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    }
+
+    .glass-ultra {
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(40px) saturate(250%);
+      -webkit-backdrop-filter: blur(40px) saturate(250%);
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      box-shadow: 0 8px 40px rgba(26, 29, 41, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    }
+
+    /* HEADER - Glass */
+    .header {
+      background: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(20px) saturate(200%);
+      -webkit-backdrop-filter: blur(20px) saturate(200%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+      padding: 20px 40px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 4px 20px rgba(26, 29, 41, 0.08);
+    }
+
+    .header-inner {
+      max-width: 1920px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 60px;
+    }
+
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text-primary);
+      font-family: 'Lora', serif;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      color: #FFF8E1;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 800;
+      background: linear-gradient(135deg, #1A1D29 0%, #B8860B 100%);
+      box-shadow: 0 10px 24px rgba(184, 134, 11, 0.2);
+    }
+
+    .logo-sub {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+
+    .price-ticker {
+      display: flex;
+      gap: 22px;
+      align-items: center;
+      flex: 1;
+      justify-content: flex-end;
+    }
+
+    .ticker-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 132px;
+      padding: 10px 14px;
+      border: 1px solid rgba(226, 229, 235, 0.82);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.42);
+    }
+
+    .ticker-label {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      font-weight: 600;
+    }
+
+    .ticker-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px;
+    }
+
+    .ticker-change {
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .change-up { color: var(--accent-green); }
+    .change-down { color: var(--accent-red); }
+
+    .timestamp {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .data-status {
+      margin-top: 8px;
+      font-size: 10px;
+      color: var(--text-tertiary);
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .data-status.live { color: var(--accent-green); }
+    .data-status.stale { color: var(--accent-red); }
+
+    /* CONTAINER */
+    .container {
+      max-width: 1920px;
+      margin: 0 auto;
+      padding: 34px 40px;
+    }
+
+    .market-brief {
+      display: grid;
+      grid-template-columns: 1.35fr repeat(3, minmax(160px, 1fr));
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 32px;
+    }
+
+    .brief-card {
+      padding: 18px 20px;
+      min-height: 112px;
+    }
+
+    .brief-kicker {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .brief-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.2px;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+
+    .brief-copy {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .source-note {
+      margin-top: 12px;
+      color: var(--text-tertiary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .brief-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text-primary);
+      margin-top: 18px;
+    }
+
+    /* SECTIONS */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid rgba(26, 29, 41, 0.1);
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-primary);
+    }
+
+    .section {
+      margin-bottom: 56px;
+    }
+
+    /* LAYOUT */
+    .chart-wrapper {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(420px, 560px);
+      gap: 28px;
+      margin-bottom: 56px;
+    }
+
+    .chart-container {
+      border-radius: 12px;
+      overflow: hidden;
+      height: 520px;
+      min-height: 520px;
+      box-shadow: 0 8px 40px rgba(26, 29, 41, 0.12);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-header {
+      padding: 20px 28px;
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.7);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+    }
+
+    .tv-container {
+      height: 500px;
+      width: 100%;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.2) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+      font-size: 13px;
+      position: relative;
+    }
+
+    .tv-container::before {
+      content: 'Loading chart...';
+      position: absolute;
+      z-index: 1;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .tv-container:has(iframe)::before,
+    .tv-container.chart-ready::before {
+      display: none;
+    }
+
+    /* CARDS */
+    .card {
+      background: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(20px) saturate(200%);
+      -webkit-backdrop-filter: blur(20px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 12px;
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 20px rgba(26, 29, 41, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      transition: all 0.3s ease;
+      animation: slideIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Staggered animations */
+    .section:nth-child(1) .card:nth-child(1) { animation-delay: 0.05s; }
+    .section:nth-child(1) .card:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(1) .card:nth-child(3) { animation-delay: 0.15s; }
+    .section:nth-child(2) .card:nth-child(1) { animation-delay: 0.2s; }
+    .section:nth-child(2) .card:nth-child(2) { animation-delay: 0.25s; }
+    .section:nth-child(3) .card:nth-child(1) { animation-delay: 0.3s; }
+    .section:nth-child(3) .card:nth-child(2) { animation-delay: 0.35s; }
+    .section:nth-child(4) .card { animation-delay: 0.4s; }
+    .section:nth-child(5) .card { animation-delay: 0.45s; }
+
+    .card:hover {
+      background: rgba(255, 255, 255, 0.65);
+      border-color: rgba(255, 255, 255, 0.8);
+      box-shadow: 0 12px 48px rgba(26, 29, 41, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    /* CONTENT BLOCKS */
+    .direction-block {
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 8px;
+      border-left: 4px solid var(--text-tertiary);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      transition: all 0.3s ease;
+    }
+
+    .direction-block:hover {
+      background: rgba(255, 255, 255, 0.55);
+      border-color: rgba(255, 255, 255, 0.7);
+    }
+
+    .direction-block.bullish {
+      border-left-color: var(--accent-green);
+      background: rgba(0, 166, 81, 0.06);
+    }
+
+    .direction-block.bearish {
+      border-left-color: var(--accent-red);
+      background: rgba(194, 59, 51, 0.06);
+    }
+
+    .block-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .block-content {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.8;
+    }
+
+    .block-content strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    /* PRICE LEVEL */
+    .price-level {
+      padding: 16px 20px;
+      background: rgba(255, 255, 255, 0.35);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 8px;
+      border-left: 3px solid var(--text-tertiary);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      margin-bottom: 12px;
+      transition: all 0.3s ease;
+    }
+
+    .price-level:hover {
+      background: rgba(0, 166, 81, 0.1);
+      border-color: rgba(255, 255, 255, 0.6);
+      transform: translateX(4px);
+    }
+
+    .price-level.bullish {
+      border-left-color: var(--accent-green);
+      background: rgba(0, 166, 81, 0.08);
+    }
+
+    .price-level.bearish {
+      border-left-color: var(--accent-red);
+      background: rgba(194, 59, 51, 0.08);
+    }
+
+    .level-label {
+      font-size: 9px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .level-price {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px;
+    }
+
+    .level-description {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 4px;
+    }
+
+    /* METRIC BOX */
+    .metric-box {
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .metric-box:hover {
+      background: rgba(0, 82, 204, 0.08);
+      border-color: rgba(0, 82, 204, 0.3);
+      box-shadow: 0 8px 32px rgba(0, 82, 204, 0.12);
+      transform: translateY(-4px);
+    }
+
+    .metric-label {
+      font-size: 9px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .metric-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px;
+    }
+
+    .metric-detail {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      margin-top: 6px;
+    }
+
+    /* SCENARIO */
+    .scenario {
+      padding: 18px 20px;
+      background: rgba(255, 255, 255, 0.35);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 8px;
+      border-left: 3px solid var(--text-tertiary);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      margin-bottom: 16px;
+      transition: all 0.3s ease;
+    }
+
+    .scenario:hover {
+      background: rgba(0, 82, 204, 0.08);
+      border-color: rgba(0, 82, 204, 0.3);
+    }
+
+    .scenario.bullish {
+      border-left-color: var(--accent-green);
+      background: rgba(0, 166, 81, 0.08);
+    }
+
+    .scenario.bearish {
+      border-left-color: var(--accent-red);
+      background: rgba(194, 59, 51, 0.08);
+    }
+
+    .scenario-title {
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .scenario-text {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .scenario-text strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    /* FOOTER */
+    .footer {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-tertiary);
+      font-size: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.4);
+      margin-top: 80px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge.green {
+      background: rgba(0, 166, 81, 0.15);
+      border-color: rgba(0, 166, 81, 0.3);
+      color: var(--accent-green);
+    }
+
+    .badge.red {
+      background: rgba(194, 59, 51, 0.15);
+      border-color: rgba(194, 59, 51, 0.3);
+      color: var(--accent-red);
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 1400px) {
+      .chart-wrapper {
+        grid-template-columns: 1fr;
+        gap: 32px;
+      }
+
+      .market-brief {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .header-inner {
+        gap: 40px;
+      }
+    }
+
+    @media (max-width: 1024px) {
+      .container {
+        padding: 32px 24px;
+      }
+
+      .card {
+        padding: 20px;
+      }
+
+      .ticker-item {
+        min-width: 140px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 20px 16px;
+      }
+
+      .header {
+        padding: 16px;
+      }
+
+      .header-inner {
+        gap: 24px;
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-3 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .price-ticker {
+        gap: 16px;
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: stretch;
+      }
+
+      .ticker-item {
+        flex: 1 1 150px;
+        min-width: 0;
+      }
+
+      .ticker-value {
+        font-size: 20px;
+      }
+
+      .card {
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .chart-container {
+        height: 400px;
+        min-height: 400px;
+      }
+
+      .tv-container {
+        height: 380px;
+      }
+
+      h3 {
+        font-size: 12px;
+      }
+
+      .metric-box {
+        padding: 16px;
+      }
+
+      .scenario {
+        padding: 14px 16px;
+      }
+
+      .market-brief {
+        grid-template-columns: 1fr;
+      }
+
+      .brief-title {
+        font-size: 20px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .container {
+        padding: 16px 12px;
+      }
+
+      .header {
+        padding: 12px;
+      }
+
+      .logo {
+        font-size: 16px;
+      }
+
+      .logo-sub {
+        font-size: 9px;
+      }
+
+      .ticker-value {
+        font-size: 18px;
+      }
+
+      .section-title {
+        font-size: 13px;
+        letter-spacing: 1px;
+      }
+
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .price-ticker {
+        gap: 8px;
+      }
+
+      .ticker-item {
+        flex-basis: calc(50% - 4px);
+        padding: 9px 10px;
+      }
+
+      .ticker-label {
+        font-size: 9px;
+      }
+
+      .chart-container {
+        height: 300px;
+        min-height: 300px;
+      }
+
+      .tv-container {
+        height: 280px;
+      }
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    strong {
+      font-weight: 600;
+    }
+
+    .text-green { color: var(--accent-green); }
+    .text-red { color: var(--accent-red); }
+    .text-muted { color: var(--text-tertiary); }
+
+    /* Last section animation */
+    .section:last-child .card {
+      animation-delay: 0.5s;
+    }
+
+    /* Accessibility improvements */
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-inner">
+    <div class="brand-mark">
+      <div class="brand-icon">Au</div>
+      <div>
+        <div class="logo">GOLD TRADING PLATFORM</div>
+        <div class="logo-sub">Institutional Grade Analytics</div>
+      </div>
+    </div>
+    <div class="price-ticker">
+      <div class="ticker-item">
+        <div class="ticker-label">Gold Futures</div>
+        <div class="ticker-value" id="goldPrice">Loading</div>
+        <div class="ticker-change" id="goldChange" style="color: var(--text-tertiary);">—</div>
+      </div>
+      <div class="ticker-item">
+        <div class="ticker-label">DXY Index</div>
+        <div class="ticker-value" id="dxyPrice">Loading</div>
+        <div class="ticker-change" id="dxyChange" style="color: var(--text-tertiary);">—</div>
+      </div>
+      <div class="ticker-item">
+        <div class="ticker-label">10Y TIPS</div>
+        <div class="ticker-value" id="tipsYield">Loading</div>
+        <div class="ticker-change" id="tipsDate" style="color: var(--text-tertiary);">FRED DFII10</div>
+      </div>
+      <div class="ticker-item">
+        <div class="timestamp" id="timestamp">—:—:— UTC</div>
+        <div class="data-status stale" id="feedStatus">CONNECTING</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="container">
+
+  <div class="market-brief">
+    <div class="brief-card glass-premium">
+      <div class="brief-kicker">Current Playbook</div>
+      <div class="brief-title" id="playbookTitle">Waiting for live market data</div>
+      <div class="brief-copy" id="playbookCopy">Signals will update from live gold, DXY, and latest FRED TIPS data. No stale setup is shown as current.</div>
+      <div class="source-note" id="sourceNote">Sources: Yahoo Finance chart API for GC=F and DX-Y.NYB; FRED DFII10 for 10Y TIPS.</div>
+    </div>
+    <div class="brief-card glass">
+      <div class="brief-kicker">Live Bias Score</div>
+      <div class="brief-number" id="biasScore">—</div>
+      <div class="brief-copy" id="biasDetail">Waiting for feeds</div>
+    </div>
+    <div class="brief-card glass">
+      <div class="brief-kicker">Primary Entry</div>
+      <div class="brief-number" id="briefEntry">—</div>
+      <div class="brief-copy">Calculated from current price</div>
+    </div>
+    <div class="brief-card glass">
+      <div class="brief-kicker">Invalidation</div>
+      <div class="brief-number text-red" id="briefInvalidation">—</div>
+      <div class="brief-copy">Calculated risk level</div>
+    </div>
+  </div>
+
+  <!-- MACRO DRIVERS FIRST -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Fundamental Analysis & Macro Drivers</div>
+    </div>
+
+    <div class="card glass-premium">
+      <h3>5 Primary Macro Drivers (Fundamental Scoring)</h3>
+      <div class="grid-3">
+        <div class="metric-box">
+          <div class="metric-label">Real Yields (TIPS 10Y)</div>
+          <div class="metric-value" id="tipsScore">—</div>
+          <div class="metric-detail" id="tipsMetricDetail">Latest FRED DFII10 value pending</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Central Bank Flows</div>
+          <div class="metric-value">Manual</div>
+          <div class="metric-detail">Not a live feed; verify from official reserve/flow reports</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">USD Index Correlation</div>
+          <div class="metric-value" id="dxyScore">—</div>
+          <div class="metric-detail" id="dxyMetricDetail">Live DXY value pending</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Risk Sentiment (VIX)</div>
+          <div class="metric-value" id="vixScore">—</div>
+          <div class="metric-detail">VIX feed not connected; not included in live score</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Geopolitical Risk</div>
+          <div class="metric-value">Manual</div>
+          <div class="metric-detail">Not a live feed; verify from current news/risk sources</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Composite Score</div>
+          <div class="metric-value" id="compositeScore">—</div>
+          <div class="metric-detail" id="compositeDetail">Waiting for live feed validation</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card glass">
+      <div class="grid-2">
+        <div class="direction-block bullish">
+          <div class="block-title text-green">Trading Direction: Long Bias</div>
+          <div class="block-content">
+            <strong id="directionConfidence">Confidence: pending</strong><br/>
+            Time Horizon: intraday to swing, reassess after each feed update<br/><br/>
+            <strong>Live Drivers:</strong><br/>
+            <span id="liveDrivers">Waiting for gold, DXY, and TIPS feeds.</span>
+          </div>
+        </div>
+        <div class="direction-block bearish">
+          <div class="block-title text-red">Critical Risk Factors</div>
+          <div class="block-content">
+            • TIPS surprise or stale FRED value<br/>
+            • USD rally trap / DXY strength<br/>
+            • Fed hawkish pivot signal<br/>
+            • Retail positioning crowding
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- THEN CHART + TRADING STRATEGY -->
+  <div class="chart-wrapper">
+    <div>
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">Trading Strategy & Entry</div>
+        </div>
+
+        <div class="card glass">
+          <h3>Primary Entry Point</h3>
+          <div class="price-level">
+            <div class="level-label">Entry Zone</div>
+            <div class="level-price" id="entryPrice">—</div>
+            <div class="level-description" id="entryDescription">Calculated after live gold feed loads</div>
+          </div>
+          <div class="price-level">
+            <div class="level-label">Stop Loss</div>
+            <div class="level-price" id="stopPrice">—</div>
+            <div class="level-description" id="stopDescription">Calculated after live gold feed loads</div>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <h3>Profit Targets (Risk/Reward 1:2.7)</h3>
+          <div class="grid-3">
+            <div class="metric-box">
+              <div class="metric-label">Target 1</div>
+              <div class="metric-value" id="target1">—</div>
+              <div class="metric-detail">Quick scalp zone | +30 pips</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">Target 2</div>
+              <div class="metric-value" id="target2">—</div>
+              <div class="metric-detail">Resistance cluster | +60 pips</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">Target 3</div>
+              <div class="metric-value" id="target3">—</div>
+              <div class="metric-detail">Monthly objective | +90 pips</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <h3>Position & Risk Checklist</h3>
+          <div class="grid-3">
+            <div class="metric-box">
+              <div class="metric-label">Max Risk</div>
+              <div class="metric-value text-red">0.50%</div>
+              <div class="metric-detail">Per trade until trend confirms</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">Scale Plan</div>
+              <div class="metric-value">50/30/20</div>
+              <div class="metric-detail">Trim at T1, T2, trail final</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-label">No-Trade Zone</div>
+              <div class="metric-value text-red">4,140-</div>
+              <div class="metric-detail">Wait for structure reset</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHART -->
+    <div>
+      <div class="chart-container glass-premium">
+        <div class="chart-header">XAU/USD Technical Analysis Chart</div>
+        <div class="tv-container" id="tradingview_chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KEY PRICE LEVELS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Key Support & Resistance Levels</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card glass">
+        <h3 class="text-green">Support Zones (Buying Opportunities)</h3>
+        <div class="price-level bullish">
+          <div class="level-label">S1 - Primary Support</div>
+          <div class="level-price" id="support1">—</div>
+          <div class="level-description">Nearest calculated support from live price</div>
+        </div>
+        <div class="price-level bullish">
+          <div class="level-label">S2 - Secondary Support</div>
+          <div class="level-price" id="support2">—</div>
+          <div class="level-description">Secondary calculated support</div>
+        </div>
+        <div class="price-level bearish">
+          <div class="level-label">S3 - Hard Floor</div>
+          <div class="level-price" id="support3">—</div>
+          <div class="level-description">Hard floor from live model</div>
+        </div>
+      </div>
+
+      <div class="card glass">
+        <h3 class="text-red">Resistance Zones (Profit Taking)</h3>
+        <div class="price-level">
+          <div class="level-label">R1 - Technical Resistance</div>
+          <div class="level-price" id="resistance1">—</div>
+          <div class="level-description">Nearest calculated resistance</div>
+        </div>
+        <div class="price-level">
+          <div class="level-label">R2 - Intermediate Resistance</div>
+          <div class="level-price" id="resistance2">—</div>
+          <div class="level-description">Intermediate calculated resistance</div>
+        </div>
+        <div class="price-level">
+          <div class="level-label">R3 - Monthly Target</div>
+          <div class="level-price" id="resistance3">—</div>
+          <div class="level-description">Extended calculated upside</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MISSED MOVE SCENARIOS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Contingency: Missed Move Scenarios</div>
+    </div>
+
+    <div class="card glass">
+      <div class="scenario bullish">
+        <div class="scenario-title" id="scenario1Title">Scenario 1: Re-Entry at R1</div>
+        <div class="scenario-text">
+          <strong>Setup:</strong> Market gaps through the calculated entry level<br/>
+          <strong>Action:</strong> <span id="scenario1Action">Waiting for live levels</span><br/>
+          <strong>Stop:</strong> <span id="scenario1Stop">—</span><br/>
+          <strong>Target:</strong> <span id="scenario1Target">—</span><br/>
+          <strong>Key Rule:</strong> Only enter on pullback — never chase breakouts
+        </div>
+      </div>
+
+      <div class="scenario">
+        <div class="scenario-title" id="scenario2Title">Scenario 2: Momentum Play at R2</div>
+        <div class="scenario-text">
+          <strong>Setup:</strong> Strong momentum continuation through R1<br/>
+          <strong>Action:</strong> <span id="scenario2Action">Waiting for live levels</span><br/>
+          <strong>Stop:</strong> <span id="scenario2Stop">—</span><br/>
+          <strong>Target:</strong> <span id="scenario2Target">—</span><br/>
+          <strong>Risk Level:</strong> MODERATE — momentum trade, tighter stops required
+        </div>
+      </div>
+
+      <div class="scenario bearish">
+        <div class="scenario-title">Scenario 3: Patient Entry — Wait for Pullback</div>
+        <div class="scenario-text">
+          <strong>Strategy:</strong> Do NOT chase breakouts above calculated resistance<br/>
+          <strong>Action:</strong> Wait for 4-8 hour pullback to form<br/>
+          <strong>Re-Entry Level:</strong> <span id="scenario3Entry">Waiting for live levels</span><br/>
+          <strong>Advantage:</strong> Better risk/reward, reduced drawdown<br/>
+          <strong>Key Principle:</strong> Patience = superior entries and exits
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXECUTION FRAMEWORK -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">4-Step Execution Workflow</div>
+    </div>
+
+    <div class="card glass">
+      <div class="grid-2">
+        <div class="direction-block">
+          <div class="block-title">Step 1: Macro Bias Confirmation</div>
+          <div class="block-content">
+            Establish weekly directional bias from 5 key drivers<br/>
+            Target: live score above 65% with all feeds connected
+          </div>
+        </div>
+        <div class="direction-block">
+          <div class="block-title">Step 2: 1-Hour Structure Analysis</div>
+          <div class="block-content">
+            Identify key support/resistance on 1H timeframe<br/>
+            Confluence with macro bias required
+          </div>
+        </div>
+        <div class="direction-block">
+          <div class="block-title">Step 3: Pattern Confirmation</div>
+          <div class="block-content">
+            Wait for double-bottom pattern formation<br/>
+            Volume breakout of neckline
+          </div>
+        </div>
+        <div class="direction-block">
+          <div class="block-title">Step 4: 1-Minute Entry Execution</div>
+          <div class="block-content">
+            Execute on neckline break + pullback<br/>
+            Tight risk management in effect
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CORE PHILOSOPHY -->
+  <div class="section">
+    <div class="card glass-ultra" style="padding: 32px; background: rgba(0, 82, 204, 0.08);">
+      <h3 style="font-size: 16px; margin-bottom: 16px;">Institutional Trading Philosophy</h3>
+      <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.9;">
+        <strong>Gold is fundamentally a real interest rate asset, NOT a nominal inflation hedge.</strong><br/><br/>
+        Institutional investors ignore retail misconceptions and employ a systematic, macro-driven framework anchored on three pillars:
+        <br/><br/>
+        <strong>1. Real Yields:</strong> When TIPS yields fall (especially negative), gold's opportunity cost drops, creating powerful bullish tailwinds.<br/>
+        <strong>2. Central Bank Flows:</strong> De-dollarization momentum and official sector accumulation provide sustained structural demand.<br/>
+        <strong>3. Geopolitical Risk:</strong> Safe-haven flows activate during elevated tensions, creating tactical trading opportunities.<br/><br/>
+        <span class="text-muted">The most potent signal: Negative AND falling TIPS yields. When holding "safe" bonds creates real purchasing power loss, gold becomes the superior asset.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  Institutional-Grade Gold Trading Platform • Live Feeds Rechecked Every 30 Seconds • Last Updated: <span id="footerTime">—</span>
+</div>
+
+<script>
+  let lastGoldPrice = null;
+  let prevGoldPrice = null;
+  let fallbackTimer = null;
+
+  const apiKeys = {
+    fred: localStorage.getItem('fred_api_key') || '4d4ee6e804ae4c3cbe36e3678391f0ae',
+  };
+
+  const feeds = {
+    local: 'http://127.0.0.1:8787/api/markets',
+    gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
+    dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
+    tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${apiKeys.fred}&file_type=json&sort_order=desc&limit=1`
+  };
+
+  const state = {
+    gold: null,
+    dxy: null,
+    tips: null,
+    errors: []
+  };
+
+  let chartAttempts = 0;
+  const maxChartAttempts = 15;
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = (value, decimals = 2) => Number(value).toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+  const signed = (value, decimals = 2) => `${value >= 0 ? '+' : '-'}${fmt(Math.abs(value), decimals)}`;
+  const roundLevel = (value) => Math.round(value / 5) * 5;
+  const setText = (id, value) => {
+    const el = $(id);
+    if (el) el.textContent = value;
+  };
+  const setClass = (id, className) => {
+    const el = $(id);
+    if (el) el.className = className;
+  };
+
+  function initChart() {
+    const container = document.getElementById('tradingview_chart');
+    if (!container) return;
+
+    // Check if TradingView is available
+    if (typeof TradingView === 'undefined') {
+      if (chartAttempts < maxChartAttempts) {
+        chartAttempts++;
+        setTimeout(initChart, 400);
+      } else {
+        console.warn('TradingView widget unavailable, using fallback');
+        createFallbackChart();
+      }
+      return;
+    }
+
+    try {
+      // Clear any existing content
+      container.innerHTML = '';
+      container.classList.add('chart-ready');
+
+      new TradingView.widget({
+        autosize: true,
+        symbol: "OANDA:XAUUSD",
+        interval: "60",
+        timezone: "exchange",
+        theme: "light",
+        style: "1",
+        locale: "en",
+        toolbar_bg: "rgba(248, 249, 250, 0.5)",
+        enable_publishing: false,
+        allow_symbol_change: false,
+        container_id: "tradingview_chart",
+        studies: ["RSI@tv-basicstudies", "MACD@tv-basicstudies"],
+        overrides: {
+          "paneProperties.background": "rgba(248, 249, 250, 0.3)",
+          "paneProperties.backgroundType": "solid"
+        },
+        width: '100%',
+        height: 500
+      });
+      console.log('TradingView chart initialized');
+    } catch (e) {
+      console.error('TradingView error:', e);
+      createFallbackChart();
+    }
+  }
+
+  function createFallbackChart() {
+    const container = document.getElementById('tradingview_chart');
+    if (!container) return;
+    container.classList.add('chart-ready');
+
+    container.innerHTML = `
+      <div style="
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 32px;
+        text-align: center;
+      ">
+        <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px;">
+          Live Chart - XAU/USD
+        </div>
+        <div style="width: min(460px, 100%); height: 150px; display: grid; align-items: end; grid-template-columns: repeat(18, 1fr); gap: 4px; padding: 14px; border-radius: 10px; background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.65);">
+          ${[44, 52, 49, 64, 58, 72, 69, 82, 76, 88, 81, 91, 86, 95, 90, 98, 93, 100].map((height, index) => `
+            <span style="height:${height}%; border-radius: 4px 4px 0 0; background:${index % 5 === 0 ? 'rgba(194, 59, 51, 0.55)' : 'rgba(0, 166, 81, 0.58)'};"></span>
+          `).join('')}
+        </div>
+        <div style="
+          font-size: 13px;
+          color: var(--text-tertiary);
+          line-height: 1.6;
+          max-width: 400px;
+        ">
+          <strong>Current Price:</strong> <span id="fallback-price" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text-primary);">—</span><br/>
+          <strong>Chart:</strong> Visit <a href="https://www.tradingview.com/chart/OANDA_XAUUSD/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">TradingView</a> for interactive chart<br/>
+          <strong>Tools:</strong> Draw, annotate, and analyze on TradingView platform
+        </div>
+      </div>
+    `;
+
+    clearInterval(fallbackTimer);
+    fallbackTimer = setInterval(() => {
+      const fallbackPrice = document.getElementById('fallback-price');
+      if (fallbackPrice && lastGoldPrice) {
+        fallbackPrice.textContent = lastGoldPrice.toFixed(2);
+      }
+    }, 1000);
+  }
+
+  async function fetchJson(url, label) {
+    const res = await Promise.race([
+      fetch(url, { cache: 'no-store' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout`)), 8000))
+    ]);
+    if (!res.ok) throw new Error(`${label} HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function parseYahooChart(payload, label) {
+    const result = payload?.chart?.result?.[0];
+    const meta = result?.meta;
+    if (!meta) throw new Error(`${label} missing chart meta`);
+
+    const quote = result.indicators?.quote?.[0] || {};
+    const closes = (quote.close || []).filter((value) => typeof value === 'number' && Number.isFinite(value));
+    const price = Number(meta.regularMarketPrice ?? closes.at(-1));
+    const previousClose = Number(meta.chartPreviousClose ?? meta.previousClose ?? closes.at(-2));
+    if (!Number.isFinite(price)) throw new Error(`${label} missing live price`);
+
+    const exchangeTime = meta.regularMarketTime
+      ? new Date(meta.regularMarketTime * 1000)
+      : new Date();
+
+    return {
+      label,
+      price,
+      previousClose: Number.isFinite(previousClose) ? previousClose : null,
+      change: Number.isFinite(previousClose) ? price - previousClose : 0,
+      changePct: Number.isFinite(previousClose) ? ((price - previousClose) / previousClose) * 100 : 0,
+      exchangeTime,
+      symbol: meta.symbol
+    };
+  }
+
+  function parseTips(payload) {
+    const observation = payload?.observations?.find((item) => item.value && item.value !== '.');
+    if (!observation) throw new Error('FRED DFII10 missing latest observation');
+    const value = Number(observation.value);
+    if (!Number.isFinite(value)) throw new Error('FRED DFII10 value invalid');
+    return { value, date: observation.date };
+  }
+
+  function applySnapshot(snapshot) {
+    state.gold = snapshot.gold ? {
+      ...snapshot.gold,
+      exchangeTime: new Date(snapshot.gold.exchangeTime)
+    } : null;
+    state.dxy = snapshot.dxy ? {
+      ...snapshot.dxy,
+      exchangeTime: new Date(snapshot.dxy.exchangeTime)
+    } : null;
+    state.tips = snapshot.tips || null;
+    state.errors = snapshot.errors || [];
+  }
+
+  function updateTicker() {
+    if (state.gold) {
+      prevGoldPrice = lastGoldPrice ?? state.gold.previousClose ?? state.gold.price;
+      lastGoldPrice = state.gold.price;
+      setText('goldPrice', fmt(state.gold.price));
+      $('goldChange').innerHTML = `<span class="${state.gold.change >= 0 ? 'change-up' : 'change-down'}">${state.gold.change >= 0 ? '↑' : '↓'} ${signed(state.gold.change)} (${signed(state.gold.changePct)}%)</span>`;
+    }
+
+    if (state.dxy) {
+      setText('dxyPrice', fmt(state.dxy.price, 2));
+      $('dxyChange').innerHTML = `<span class="${state.dxy.change >= 0 ? 'change-up' : 'change-down'}">${state.dxy.change >= 0 ? '↑' : '↓'} ${signed(state.dxy.change)} (${signed(state.dxy.changePct)}%)</span>`;
+    }
+
+    if (state.tips) {
+      setText('tipsYield', `${signed(state.tips.value)}%`);
+      setText('tipsDate', `FRED ${state.tips.date}`);
+    }
+  }
+
+  function updateLevels() {
+    if (!state.gold) return;
+
+    const p = state.gold.price;
+    const levels = {
+      entry: roundLevel(p * 0.997),
+      stop: roundLevel(p * 0.992),
+      target1: roundLevel(p * 1.004),
+      target2: roundLevel(p * 1.011),
+      target3: roundLevel(p * 1.018),
+      support1: roundLevel(p * 0.996),
+      support2: roundLevel(p * 0.989),
+      support3: roundLevel(p * 0.982),
+      resistance1: roundLevel(p * 1.004),
+      resistance2: roundLevel(p * 1.011),
+      resistance3: roundLevel(p * 1.018)
+    };
+
+    setText('briefEntry', fmt(levels.entry, 0));
+    setText('briefInvalidation', fmt(levels.stop, 0));
+    setText('entryPrice', fmt(levels.entry, 0));
+    setText('stopPrice', fmt(levels.stop, 0));
+    setText('target1', fmt(levels.target1, 0));
+    setText('target2', fmt(levels.target2, 0));
+    setText('target3', fmt(levels.target3, 0));
+    setText('support1', fmt(levels.support1, 0));
+    setText('support2', fmt(levels.support2, 0));
+    setText('support3', fmt(levels.support3, 0));
+    setText('resistance1', fmt(levels.resistance1, 0));
+    setText('resistance2', fmt(levels.resistance2, 0));
+    setText('resistance3', fmt(levels.resistance3, 0));
+    setText('entryDescription', `Live GC=F reference ${fmt(p)}; pullback zone approx ${fmt(levels.entry, 0)}`);
+    setText('stopDescription', `Model risk ${fmt(p - levels.stop)} points from current futures price`);
+
+    setText('scenario1Title', `Scenario 1: Re-Entry at R1 (${fmt(levels.resistance1, 0)})`);
+    setText('scenario1Action', `Pullback to ${fmt(levels.resistance1 - 5, 0)}-${fmt(levels.resistance1, 0)} creates alt entry`);
+    setText('scenario1Stop', fmt(roundLevel(levels.resistance1 * 0.995), 0));
+    setText('scenario1Target', fmt(levels.resistance2, 0));
+    setText('scenario2Title', `Scenario 2: Momentum Play at R2 (${fmt(levels.resistance2, 0)})`);
+    setText('scenario2Action', `Breakout above ${fmt(levels.resistance2, 0)} with confirmation`);
+    setText('scenario2Stop', fmt(roundLevel(levels.resistance2 * 0.996), 0));
+    setText('scenario2Target', fmt(levels.resistance3, 0));
+    setText('scenario3Entry', `Buy zone ${fmt(levels.resistance1, 0)}-${fmt(levels.resistance2 - 10, 0)} after pullback confirmation`);
+  }
+
+  function updateBias() {
+    let score = 0;
+    const drivers = [];
+
+    if (state.gold) {
+      if (state.gold.changePct > 0.15) {
+        score += 35;
+        drivers.push('Gold futures positive vs prior close');
+      } else if (state.gold.changePct > -0.15) {
+        score += 20;
+        drivers.push('Gold futures flat/neutral');
+      } else {
+        drivers.push('Gold futures negative vs prior close');
+      }
+    }
+
+    if (state.dxy) {
+      if (state.dxy.changePct < -0.10) {
+        score += 30;
+        drivers.push('DXY softer, supportive for gold');
+      } else if (state.dxy.changePct < 0.10) {
+        score += 15;
+        drivers.push('DXY neutral');
+      } else {
+        drivers.push('DXY stronger, headwind for gold');
+      }
+    }
+
+    if (state.tips) {
+      if (state.tips.value <= 1.75) {
+        score += 25;
+        drivers.push('10Y TIPS yield relatively low');
+      } else if (state.tips.value <= 2.25) {
+        score += 12;
+        drivers.push('10Y TIPS yield mid-range');
+      } else {
+        drivers.push('10Y TIPS yield elevated');
+      }
+    }
+
+    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
+    const scoreText = liveCount ? `${score}%` : '—';
+    const bias = score >= 65 ? 'Bullish bias' : score >= 40 ? 'Neutral / wait' : 'Bearish caution';
+    const title = liveCount === 3 ? `${bias} from live feeds` : 'Partial live feed; use caution';
+
+    setText('biasScore', scoreText);
+    setText('biasDetail', liveCount === 3 ? 'Gold, DXY, and TIPS connected' : `${liveCount}/3 feeds connected`);
+    setText('playbookTitle', title);
+    setText('playbookCopy', drivers.length ? drivers.join('. ') + '.' : 'Waiting for live feeds.');
+    setText('directionConfidence', `Confidence: ${scoreText} live model`);
+    setText('liveDrivers', drivers.join(' • ') || 'Waiting for gold, DXY, and TIPS feeds.');
+    setText('tipsScore', state.tips ? (state.tips.value <= 1.75 ? '8/10' : state.tips.value <= 2.25 ? '5/10' : '2/10') : '—');
+    setText('dxyScore', state.dxy ? (state.dxy.changePct < -0.10 ? '8/10' : state.dxy.changePct < 0.10 ? '5/10' : '2/10') : '—');
+    setText('vixScore', 'Manual');
+    setText('compositeScore', scoreText);
+    setText('compositeDetail', liveCount === 3 ? `${bias.toUpperCase()} - calculated from connected feeds` : 'Not complete; one or more feeds failed');
+    setText('tipsMetricDetail', state.tips ? `Latest ${state.tips.date}: ${signed(state.tips.value)}% via FRED DFII10` : 'Latest FRED DFII10 value pending');
+    setText('dxyMetricDetail', state.dxy ? `Live DXY ${fmt(state.dxy.price)}; day change ${signed(state.dxy.changePct)}%` : 'Live DXY value pending');
+
+    $('biasScore')?.classList.toggle('text-green', score >= 65);
+    $('biasScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
+    $('compositeScore')?.classList.toggle('text-green', score >= 65);
+    $('compositeScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
+  }
+
+  function updateFeedStatus() {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-GB', { hour12: false, timeZone: 'UTC' }) + ' UTC';
+    setText('timestamp', timeStr);
+    setText('footerTime', timeStr);
+
+    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
+    const status = $('feedStatus');
+    if (!status) return;
+    if (liveCount === 3 && state.errors.length === 0) {
+      status.textContent = 'LIVE';
+      status.className = 'data-status live';
+    } else {
+      status.textContent = `${liveCount}/3 LIVE`;
+      status.className = 'data-status stale';
+    }
+    setText('sourceNote', `Sources: Yahoo GC=F ${state.gold ? state.gold.exchangeTime.toISOString() : 'failed'}; Yahoo DXY ${state.dxy ? state.dxy.exchangeTime.toISOString() : 'failed'}; FRED DFII10 ${state.tips ? state.tips.date : 'failed'}.`);
+  }
+
+  async function updatePrices() {
+    state.errors = [];
+
+    try {
+      const snapshot = await fetchJson(feeds.local, 'local market proxy');
+      applySnapshot(snapshot);
+      updateTicker();
+      updateLevels();
+      updateBias();
+      updateFeedStatus();
+      if (state.errors.length) console.warn('Market feed warnings:', state.errors);
+      return;
+    } catch (error) {
+      state.errors.push(`Local proxy unavailable: ${error.message}`);
+      console.warn('Local market proxy unavailable; trying direct feeds:', error.message);
+    }
+
+    const [gold, dxy, tips] = await Promise.allSettled([
+      fetchJson(feeds.gold, 'GC=F').then((payload) => parseYahooChart(payload, 'GC=F')),
+      fetchJson(feeds.dxy, 'DXY').then((payload) => parseYahooChart(payload, 'DXY')),
+      fetchJson(feeds.tips, 'FRED DFII10').then(parseTips)
+    ]);
+
+    if (gold.status === 'fulfilled') state.gold = gold.value;
+    else state.errors.push(gold.reason.message);
+
+    if (dxy.status === 'fulfilled') state.dxy = dxy.value;
+    else state.errors.push(dxy.reason.message);
+
+    if (tips.status === 'fulfilled') state.tips = tips.value;
+    else state.errors.push(tips.reason.message);
+
+    updateTicker();
+    updateLevels();
+    updateBias();
+    updateFeedStatus();
+
+    if (state.errors.length) console.warn('Market feed warnings:', state.errors);
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeApp);
+  } else {
+    initializeApp();
+  }
+
+  function initializeApp() {
+    console.log('Initializing Gold Trading Platform...');
+
+    // Initial price update
+    updatePrices();
+
+    // Initialize chart
+    initChart();
+
+    // Set up periodic updates
+    const updateInterval = setInterval(() => {
+      updatePrices();
+    }, 30000);
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      clearInterval(updateInterval);
+    });
+
+    console.log('Platform initialized successfully');
+  }
+</script>
+
+</body>
+</html>

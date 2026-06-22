@@ -1,0 +1,19 @@
+{
+  "name": "gold-trading-platform",
+  "version": "1.0.0",
+  "description": "Institutional-grade gold trading dashboard with live market data",
+  "main": "gold-market-proxy.js",
+  "scripts": {
+    "start": "node gold-market-proxy.js",
+    "dev": "node gold-market-proxy.js"
+  },
+  "keywords": [
+    "gold",
+    "trading",
+    "forex",
+    "technical-analysis",
+    "macro-analysis"
+  ],
+  "author": "Xanan",
+  "license": "MIT"
+}
