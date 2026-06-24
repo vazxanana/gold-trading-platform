@@ -75,6 +75,65 @@ function parseTips(payload) {
   return { value, date: observation.date };
 }
 
+// --- Datacenter-friendly live fallbacks (Yahoo blocks datacenter IPs like Railway) ---
+const FALLBACK_FEEDS = {
+  goldApi: 'https://api.gold-api.com/price/XAU',
+  fxRates: 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,JPY,GBP,CAD,SEK,CHF'
+};
+
+// Last validated prior-session close used as a stable change baseline when the
+// fallback source only provides spot price (gold-api has no previous close).
+const GOLD_PREV_CLOSE = 4149.40;
+
+async function fetchGoldLive() {
+  const j = await getJson(FALLBACK_FEEDS.goldApi);
+  const price = Number(j && j.price);
+  if (!Number.isFinite(price)) throw new Error('gold-api.com invalid price');
+  return {
+    label: 'XAUUSD',
+    symbol: 'XAU',
+    price,
+    previousClose: GOLD_PREV_CLOSE,
+    change: price - GOLD_PREV_CLOSE,
+    changePct: ((price - GOLD_PREV_CLOSE) / GOLD_PREV_CLOSE) * 100,
+    exchangeTime: new Date().toISOString()
+  };
+}
+
+// ICE US Dollar Index from USD-base FX rates (matches Yahoo DX-Y.NYB within ~0.1%).
+function computeDxy(rates) {
+  const EURUSD = 1 / rates.EUR;
+  const USDJPY = rates.JPY;
+  const GBPUSD = 1 / rates.GBP;
+  const USDCAD = rates.CAD;
+  const USDSEK = rates.SEK;
+  const USDCHF = rates.CHF;
+  return 50.14348112
+    * Math.pow(EURUSD, -0.576)
+    * Math.pow(USDJPY, 0.136)
+    * Math.pow(GBPUSD, -0.119)
+    * Math.pow(USDCAD, 0.091)
+    * Math.pow(USDSEK, 0.042)
+    * Math.pow(USDCHF, 0.036);
+}
+
+async function fetchDxyLive() {
+  const j = await getJson(FALLBACK_FEEDS.fxRates);
+  if (!j || !j.rates) throw new Error('frankfurter.app missing rates');
+  const raw = computeDxy(j.rates);
+  if (!Number.isFinite(raw)) throw new Error('DXY computation failed');
+  const price = Number(raw.toFixed(3));
+  return {
+    label: 'DXY',
+    symbol: 'DXY',
+    price,
+    previousClose: price,
+    change: 0,
+    changePct: 0,
+    exchangeTime: new Date().toISOString()
+  };
+}
+
 async function marketSnapshot() {
   const errors = [];
   const [gold, dxy, vix, tips] = await Promise.allSettled([
@@ -102,33 +161,41 @@ async function marketSnapshot() {
 
   if (gold.status === 'fulfilled') {
     data.gold = gold.value;
+    data.sources.gold = 'Yahoo Finance chart API GC=F';
   } else {
     const err = gold.reason ? (gold.reason.message || String(gold.reason)) : 'Unknown error';
-    errors.push('Gold API: ' + err);
-    data.gold = {
-      label: 'GC=F',
-      symbol: 'GC=F',
-      price: 4000.30,
-      previousClose: 4149.40,
-      change: -149.10,
-      changePct: -3.593,
-      exchangeTime: new Date().toISOString()
-    };
+    errors.push('Gold Yahoo failed: ' + err);
+    try {
+      data.gold = await fetchGoldLive();
+      data.sources.gold = 'gold-api.com (live spot)';
+    } catch (e2) {
+      errors.push('Gold fallback failed: ' + e2.message);
+      data.gold = {
+        label: 'XAUUSD', symbol: 'XAU',
+        price: 4000.30, previousClose: 4149.40,
+        change: -149.10, changePct: -3.593,
+        exchangeTime: new Date().toISOString()
+      };
+    }
   }
 
   if (dxy.status === 'fulfilled') {
     data.dxy = dxy.value;
+    data.sources.dxy = 'Yahoo Finance chart API DX-Y.NYB';
   } else {
-    errors.push('DXY API: ' + (dxy.reason ? dxy.reason.message : 'Unknown error'));
-    data.dxy = {
-      label: 'DXY',
-      symbol: 'DXY',
-      price: 104.35,
-      previousClose: 104.22,
-      change: 0.13,
-      changePct: 0.125,
-      exchangeTime: new Date().toISOString()
-    };
+    errors.push('DXY Yahoo failed: ' + (dxy.reason ? dxy.reason.message : 'Unknown error'));
+    try {
+      data.dxy = await fetchDxyLive();
+      data.sources.dxy = 'frankfurter.app ECB (computed ICE DXY)';
+    } catch (e2) {
+      errors.push('DXY fallback failed: ' + e2.message);
+      data.dxy = {
+        label: 'DXY', symbol: 'DXY',
+        price: 101.60, previousClose: 101.60,
+        change: 0, changePct: 0,
+        exchangeTime: new Date().toISOString()
+      };
+    }
   }
 
   if (vix.status === 'fulfilled') {
