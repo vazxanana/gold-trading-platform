@@ -815,6 +815,136 @@
         transition-duration: 0.01ms !important;
       }
     }
+
+    /* ===== Economic Calendar + Momentum ===== */
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: 1.7fr 1fr;
+      gap: 20px;
+      align-items: stretch;
+    }
+    @media (max-width: 1100px) { .calendar-grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      padding: 22px 24px;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .panel-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: var(--text-primary);
+      text-transform: uppercase;
+    }
+    .panel-sub {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      font-weight: 600;
+    }
+
+    .cal-table { width: 100%; border-collapse: collapse; }
+    .cal-table thead th {
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--text-tertiary);
+      font-weight: 700;
+      text-align: right;
+      padding: 0 10px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .cal-table thead th.left { text-align: left; }
+    .cal-table tbody td {
+      font-size: 12px;
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--border-light);
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .cal-table tbody tr:last-child td { border-bottom: none; }
+    .cal-table tbody tr:hover { background: rgba(184, 134, 11, 0.05); }
+    .cal-event { text-align: left !important; font-family: 'Inter', sans-serif !important; }
+    .cal-event .ev-name { font-weight: 600; color: var(--text-primary); font-size: 12.5px; }
+    .cal-event .ev-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 2px; }
+    .cal-when { text-align: left !important; font-size: 11px !important; color: var(--text-tertiary) !important; }
+    .cal-when .ev-day { color: var(--text-secondary); font-weight: 600; display: block; }
+
+    .impact-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      margin-right: 7px;
+      box-shadow: 0 0 0 3px rgba(194, 59, 51, 0.14);
+      vertical-align: middle;
+    }
+    .flag { margin-right: 6px; font-size: 13px; vertical-align: middle; }
+
+    .val-actual-up { color: var(--accent-green); font-weight: 700; }
+    .val-actual-down { color: var(--accent-red); font-weight: 700; }
+    .val-pending { color: var(--text-tertiary); }
+    .cal-upcoming td { background: rgba(0, 82, 204, 0.035); }
+
+    .cal-legend {
+      display: flex;
+      gap: 18px;
+      margin-top: 14px;
+      font-size: 10px;
+      color: var(--text-tertiary);
+      letter-spacing: 0.4px;
+    }
+
+    /* Momentum / pip card */
+    .momentum {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      background: linear-gradient(160deg, rgba(26,29,41,0.97) 0%, rgba(40,44,60,0.97) 100%);
+      color: #fff;
+      border-radius: 14px;
+      padding: 24px 26px;
+      min-height: 100%;
+    }
+    .mom-tag {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: rgba(255,255,255,0.55);
+      font-weight: 600;
+    }
+    .mom-pair {
+      font-size: 30px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px;
+      margin: 4px 0 2px;
+    }
+    .mom-px { font-size: 13px; color: rgba(255,255,255,0.7); font-family: 'JetBrains Mono', monospace; }
+    .mom-divider { height: 1px; background: rgba(255,255,255,0.12); margin: 18px 0; }
+    .mom-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+    .mom-row .lbl { font-size: 10.5px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; }
+    .mom-pips { font-size: 26px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
+    .mom-pips.small { font-size: 18px; }
+    .pips-up { color: #4ade80; }
+    .pips-down { color: #f87171; }
+    .mom-driver {
+      margin-top: 16px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: rgba(255,255,255,0.62);
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding-top: 14px;
+    }
+    .mom-driver strong { color: #fff; }
   </style>
 </head>
 <body>
@@ -841,9 +971,9 @@
         <div class="ticker-change" id="dxyChange" style="color: var(--text-tertiary);">—</div>
       </div>
       <div class="ticker-item">
-        <div class="ticker-label">10Y TIPS</div>
+        <div class="ticker-label">10Y Real Yield</div>
         <div class="ticker-value" id="tipsYield">Loading</div>
-        <div class="ticker-change" id="tipsDate" style="color: var(--text-tertiary);">FRED DFII10</div>
+        <div class="ticker-change" id="tipsDate" style="color: var(--text-tertiary);">Real yield · FRED DFII10</div>
       </div>
       <div class="ticker-item">
         <div class="timestamp" id="timestamp">—:—:— UTC</div>
@@ -1150,22 +1280,53 @@
     </div>
   </div>
 
-  <!-- ECONOMIC CALENDAR & 5-MIN DXY MOVE -->
+  <!-- ECONOMIC CALENDAR & CURRENCY MOMENTUM -->
   <div class="section">
     <div class="section-header">
-      <div class="section-title">📅 Economic Calendar & Currency Momentum</div>
+      <div class="section-title">Economic Calendar &amp; Currency Momentum</div>
     </div>
-    <div class="card glass" style="padding: 20px; display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
-      <div>
-        <h3 style="font-size: 14px; margin-bottom: 12px; font-weight: 600;">High-Impact Events (24h)</h3>
-        <div id="calendarEvents" style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
-          <div style="color: var(--text-tertiary);">Loading events...</div>
+    <div class="calendar-grid">
+      <div class="card glass panel">
+        <div class="panel-head">
+          <div class="panel-title">High-Impact Events</div>
+          <div class="panel-sub">Red folder &middot; ±7 days</div>
+        </div>
+        <table class="cal-table">
+          <thead>
+            <tr>
+              <th class="left">When</th>
+              <th class="left">Event</th>
+              <th>Previous</th>
+              <th>Forecast</th>
+              <th>Actual</th>
+            </tr>
+          </thead>
+          <tbody id="calendarBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:20px;">Loading calendar…</td></tr>
+          </tbody>
+        </table>
+        <div class="cal-legend">
+          <span><span class="impact-dot"></span>High impact</span>
+          <span class="val-actual-up">▲ Beat</span>
+          <span class="val-actual-down">▼ Miss</span>
+          <span class="val-pending">— Pending</span>
         </div>
       </div>
-      <div style="border-left: 1px solid rgba(226, 229, 235, 0.6); padding-left: 20px;">
-        <h3 style="font-size: 14px; margin-bottom: 12px; font-weight: 600;">5-Min DXY Move</h3>
-        <div style="font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono'; color: var(--accent-green);" id="dxyMove5m">—</div>
-        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;" id="dxyMove5mPct">Tracking...</div>
+
+      <div class="momentum" id="momentumCard">
+        <div class="mom-tag">Next red-folder currency</div>
+        <div class="mom-pair" id="momPair">—</div>
+        <div class="mom-px" id="momPx">Waiting for feed…</div>
+        <div class="mom-divider"></div>
+        <div class="mom-row">
+          <span class="lbl">Today</span>
+          <span class="mom-pips" id="momDayPips">—</span>
+        </div>
+        <div class="mom-row">
+          <span class="lbl">Last 5 min</span>
+          <span class="mom-pips small" id="mom5mPips">—</span>
+        </div>
+        <div class="mom-driver" id="momDriver">Tracks the pip move of the pair tied to the next high-impact release.</div>
       </div>
     </div>
   </div>
@@ -1215,6 +1376,7 @@
     gold: null,
     dxy: null,
     tips: null,
+    fx: null,
     errors: []
   };
 
@@ -1385,6 +1547,7 @@
       exchangeTime: new Date(snapshot.dxy.exchangeTime)
     } : null;
     state.tips = snapshot.tips || null;
+    state.fx = snapshot.fx || null;
     state.errors = snapshot.errors || [];
   }
 
@@ -1402,8 +1565,8 @@
     }
 
     if (state.tips) {
-      setText('tipsYield', `${signed(state.tips.value)}%`);
-      setText('tipsDate', `FRED ${state.tips.date}`);
+      setText('tipsYield', `${fmt(state.tips.value)}%`);
+      setText('tipsDate', `Real yield · FRED ${state.tips.date}`);
     }
   }
 
@@ -1546,6 +1709,7 @@
       updateLevels();
       updateBias();
       updateFeedStatus();
+      trackPair();
       if (state.errors.length) console.warn('Market feed warnings:', state.errors);
       return;
     } catch (error) {
@@ -1572,57 +1736,136 @@
     updateLevels();
     updateBias();
     updateFeedStatus();
-    trackDxyPrice();
+    trackPair();
 
     if (state.errors.length) console.warn('Market feed warnings:', state.errors);
   }
 
-  let dxyPrices = [];
+  // ===== Economic calendar + country-aware pip tracker =====
+  let calendarData = [];
+  let activePair = null;     // e.g. 'GBPUSD'
+  let activeEvent = null;    // next high-impact event
+  let pairSamples = [];      // {price, time} for 5-min tracking of the active pair
 
-  function trackDxyPrice() {
-    if (!state.dxy) return;
-    dxyPrices.push({price: state.dxy.price, time: Date.now()});
-    if (dxyPrices.length > 60) dxyPrices.shift();
-    updateDxy5mDisplay();
+  const COUNTRY_PAIR = {
+    'United States': 'EURUSD', 'United Kingdom': 'GBPUSD',
+    'Eurozone': 'EURUSD', 'Euro Area': 'EURUSD', 'Japan': 'USDJPY'
+  };
+  const COUNTRY_FLAG = {
+    'United States': '🇺🇸', 'United Kingdom': '🇬🇧',
+    'Eurozone': '🇪🇺', 'Euro Area': '🇪🇺', 'Japan': '🇯🇵'
+  };
+  const pipFactor = (pair) => (pair === 'USDJPY' ? 100 : 10000);
+  const pairLabel = (pair) => pair ? `${pair.slice(0,3)}/${pair.slice(3)}` : '—';
+  const calNum = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : null; };
+
+  async function loadCalendar() {
+    try {
+      const url = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+        ? `http://${location.hostname}:8787/api/calendar`
+        : 'https://gold-trading-platform-production.up.railway.app/api/calendar';
+      const res = await fetch(url, { cache: 'no-store' });
+      const data = await res.json();
+      calendarData = data.events || [];
+    } catch (e) {
+      console.warn('Calendar fetch failed:', e.message);
+      calendarData = [];
+    }
+    renderCalendar();
   }
 
-  function updateDxy5mDisplay() {
-    if (dxyPrices.length < 2) return;
+  function renderCalendar() {
+    const body = document.getElementById('calendarBody');
+    if (!body) return;
+    if (!calendarData.length) {
+      body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:20px;">No high-impact events</td></tr>';
+      return;
+    }
+
     const now = Date.now();
-    const fiveMinAgo = now - 300000;
-    const oldPrices = dxyPrices.filter(p => p.time >= fiveMinAgo);
-    if (oldPrices.length < 2) return;
+    const sorted = [...calendarData].sort((a, b) => new Date(a.DateTime) - new Date(b.DateTime));
+    activeEvent = sorted.find(e => new Date(e.DateTime).getTime() > now) || sorted[sorted.length - 1];
+    activePair = COUNTRY_PAIR[activeEvent && activeEvent.Country] || 'EURUSD';
 
-    const change = oldPrices[oldPrices.length - 1].price - oldPrices[0].price;
-    const pct = (change / oldPrices[0].price) * 100;
-    const sign = change >= 0 ? '+' : '';
-    const color = change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+    body.innerHTML = sorted.map(e => {
+      const d = new Date(e.DateTime);
+      const upcoming = d.getTime() > now;
+      const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const flag = COUNTRY_FLAG[e.Country] || '🌍';
+      const isNext = (e === activeEvent);
 
-    const el = document.getElementById('dxyMove5m');
-    const pctEl = document.getElementById('dxyMove5mPct');
-    if (el) el.innerHTML = `<span style="color: ${color}">${sign}${fmt(change, 4)}</span>`;
-    if (pctEl) pctEl.textContent = `${sign}${fmt(Math.abs(pct), 3)}% (${oldPrices.length} pts)`;
-  }
+      let actualCell = '<span class="val-pending">—</span>';
+      if (e.Actual) {
+        const av = calNum(e.Actual), fv = calNum(e.Consensus);
+        let cls = '', arrow = '';
+        if (av !== null && fv !== null) { cls = av >= fv ? 'val-actual-up' : 'val-actual-down'; arrow = av >= fv ? '▲ ' : '▼ '; }
+        actualCell = `<span class="${cls}">${arrow}${e.Actual}</span>`;
+      }
 
-  function updateCalendarDisplay() {
-    const events = [
-      {Event: 'Initial Jobless Claims', Consensus: '250K', DateTime: new Date(Date.now() + 86400000).toISOString()},
-      {Event: 'PCE Inflation Rate', Consensus: '2.8%', DateTime: new Date(Date.now() + 172800000).toISOString()},
-      {Event: 'Non-Farm Payrolls', Consensus: '+200K', DateTime: new Date(Date.now() + 259200000).toISOString()},
-      {Event: 'Fed Rate Decision', Consensus: '5.25%', DateTime: new Date(Date.now() + 432000000).toISOString()},
-      {Event: 'BOE Rate Decision', Consensus: '5.25%', DateTime: new Date(Date.now() + 518400000).toISOString()}
-    ];
-
-    const html = events.map(e => {
-      const time = new Date(e.DateTime).toLocaleDateString('en-US', {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-      return `<div style="padding: 8px; background: rgba(255,255,255,0.3); border-radius: 6px; border-left: 2px solid var(--accent-red);">
-        <strong>${e.Event}</strong><br/>
-        <span style="font-size: 11px; color: var(--text-tertiary);">${time} • Consensus: ${e.Consensus}</span>
-      </div>`;
+      return `<tr class="${upcoming ? 'cal-upcoming' : ''}">
+        <td class="cal-when"><span class="ev-day">${day}</span>${time}</td>
+        <td class="cal-event">
+          <div class="ev-name"><span class="impact-dot"></span><span class="flag">${flag}</span>${e.Event}${isNext ? ' ⏱' : ''}</div>
+          <div class="ev-meta">${e.Country}</div>
+        </td>
+        <td>${e.Previous || '—'}</td>
+        <td>${e.Consensus || '—'}</td>
+        <td>${actualCell}</td>
+      </tr>`;
     }).join('');
 
-    const el = document.getElementById('calendarEvents');
-    if (el) el.innerHTML = html;
+    updateMomentumLabels();
+    renderMomentum();
+  }
+
+  function updateMomentumLabels() {
+    const pairEl = document.getElementById('momPair');
+    const driverEl = document.getElementById('momDriver');
+    if (pairEl) pairEl.textContent = pairLabel(activePair);
+    if (driverEl && activeEvent) {
+      const flag = COUNTRY_FLAG[activeEvent.Country] || '🌍';
+      driverEl.innerHTML = `Next high-impact: <strong>${flag} ${activeEvent.Event}</strong> (${activeEvent.Country}). Watching <strong>${pairLabel(activePair)}</strong> for the reaction.`;
+    }
+  }
+
+  function trackPair() {
+    if (!activePair || !state.fx || !state.fx[activePair]) return;
+    pairSamples.push({ price: state.fx[activePair].price, time: Date.now() });
+    if (pairSamples.length > 80) pairSamples.shift();
+    renderMomentum();
+  }
+
+  function renderMomentum() {
+    if (!activePair || !state.fx || !state.fx[activePair]) return;
+    const fx = state.fx[activePair];
+    const factor = pipFactor(activePair);
+    const decimals = activePair === 'USDJPY' ? 3 : 5;
+
+    const pxEl = document.getElementById('momPx');
+    const dayEl = document.getElementById('momDayPips');
+    const fiveEl = document.getElementById('mom5mPips');
+
+    if (pxEl) pxEl.textContent = `${fx.price.toFixed(decimals)}  ·  prev ${Number(fx.previousClose).toFixed(decimals)}`;
+
+    const dayPips = (fx.change || 0) * factor;
+    if (dayEl) {
+      dayEl.textContent = `${dayPips >= 0 ? '+' : ''}${dayPips.toFixed(1)} pips`;
+      dayEl.className = `mom-pips ${dayPips >= 0 ? 'pips-up' : 'pips-down'}`;
+    }
+
+    const now = Date.now();
+    const recent = pairSamples.filter(s => s.time >= now - 300000);
+    if (recent.length >= 2) {
+      const p5 = (recent[recent.length - 1].price - recent[0].price) * factor;
+      if (fiveEl) {
+        fiveEl.textContent = `${p5 >= 0 ? '+' : ''}${p5.toFixed(1)} pips`;
+        fiveEl.className = `mom-pips small ${p5 >= 0 ? 'pips-up' : 'pips-down'}`;
+      }
+    } else if (fiveEl) {
+      fiveEl.textContent = 'collecting…';
+      fiveEl.className = 'mom-pips small';
+    }
   }
 
   // Initialize when DOM is ready
@@ -1635,25 +1878,29 @@
   function initializeApp() {
     console.log('Initializing Gold Trading Platform...');
 
-    // Initial price update
+    // Initial price update + calendar
     updatePrices();
-    updateCalendarDisplay();
+    loadCalendar();
 
     // Initialize chart
     initChart();
 
-    // Set up 5-second DXY tracking
-    const dxyInterval = setInterval(trackDxyPrice, 5000);
+    // Sample the active pair every 5s for the 5-minute pip move
+    const pairInterval = setInterval(trackPair, 5000);
 
-    // Set up periodic updates every 30 seconds
+    // Refresh market data every 30 seconds
     const updateInterval = setInterval(() => {
       updatePrices();
     }, 30000);
 
+    // Refresh the economic calendar every 10 minutes
+    const calendarInterval = setInterval(loadCalendar, 600000);
+
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
       clearInterval(updateInterval);
-      clearInterval(dxyInterval);
+      clearInterval(pairInterval);
+      clearInterval(calendarInterval);
     });
 
     console.log('Platform initialized successfully');

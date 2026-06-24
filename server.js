@@ -134,13 +134,50 @@ async function fetchDxyLive() {
   };
 }
 
+// FX pairs for the country-aware pip tracker. Yahoo gives intraday (localhost);
+// frankfurter time-series gives a real daily change that works from datacenters.
+const FX_YAHOO = {
+  EURUSD: 'https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?range=1d&interval=1m',
+  GBPUSD: 'https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD=X?range=1d&interval=1m',
+  USDJPY: 'https://query1.finance.yahoo.com/v8/finance/chart/USDJPY=X?range=1d&interval=1m'
+};
+
+function fxEntry(price, prevClose) {
+  return {
+    price,
+    previousClose: prevClose,
+    change: price - prevClose,
+    changePct: ((price - prevClose) / prevClose) * 100,
+    exchangeTime: new Date().toISOString()
+  };
+}
+
+async function fetchFxFallback() {
+  const end = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
+  const j = await getJson(`https://api.frankfurter.dev/v1/${start}..${end}?base=USD&symbols=EUR,GBP,JPY`);
+  if (!j || !j.rates) throw new Error('frankfurter time-series missing rates');
+  const dates = Object.keys(j.rates).sort();
+  if (!dates.length) throw new Error('frankfurter empty series');
+  const last = j.rates[dates[dates.length - 1]];
+  const prev = j.rates[dates[dates.length - 2]] || last;
+  return {
+    EURUSD: fxEntry(1 / last.EUR, 1 / prev.EUR),
+    GBPUSD: fxEntry(1 / last.GBP, 1 / prev.GBP),
+    USDJPY: fxEntry(last.JPY, prev.JPY)
+  };
+}
+
 async function marketSnapshot() {
   const errors = [];
-  const [gold, dxy, vix, tips] = await Promise.allSettled([
+  const [gold, dxy, vix, tips, eur, gbp, jpy] = await Promise.allSettled([
     getJson(FEEDS.gold).then((payload) => parseYahooChart(payload, 'GC=F')),
     getJson(FEEDS.dxy).then((payload) => parseYahooChart(payload, 'DXY')),
     getJson(FEEDS.vix).then((payload) => parseYahooChart(payload, 'VIX')),
-    getJson(FEEDS.tips).then(parseTips)
+    getJson(FEEDS.tips).then(parseTips),
+    getJson(FX_YAHOO.EURUSD).then((p) => parseYahooChart(p, 'EURUSD')),
+    getJson(FX_YAHOO.GBPUSD).then((p) => parseYahooChart(p, 'GBPUSD')),
+    getJson(FX_YAHOO.USDJPY).then((p) => parseYahooChart(p, 'USDJPY'))
   ]);
 
   const data = {
@@ -150,12 +187,14 @@ async function marketSnapshot() {
       gold: 'Yahoo Finance chart API GC=F',
       dxy: 'Yahoo Finance chart API DX-Y.NYB',
       vix: 'Yahoo Finance chart API ^VIX',
-      tips: 'FRED DFII10'
+      tips: 'FRED DFII10',
+      fx: 'Yahoo Finance FX'
     },
     gold: null,
     dxy: null,
     vix: null,
     tips: null,
+    fx: {},
     errors
   };
 
@@ -206,6 +245,23 @@ async function marketSnapshot() {
 
   if (tips.status === 'fulfilled') data.tips = tips.value;
   else errors.push('TIPS API: ' + (tips.reason ? tips.reason.message : 'Unknown error'));
+
+  // FX pairs: Yahoo intraday where available, frankfurter daily change otherwise
+  if (eur.status === 'fulfilled') data.fx.EURUSD = eur.value;
+  if (gbp.status === 'fulfilled') data.fx.GBPUSD = gbp.value;
+  if (jpy.status === 'fulfilled') data.fx.USDJPY = jpy.value;
+
+  if (!data.fx.EURUSD || !data.fx.GBPUSD || !data.fx.USDJPY) {
+    try {
+      const fb = await fetchFxFallback();
+      if (!data.fx.EURUSD) data.fx.EURUSD = fb.EURUSD;
+      if (!data.fx.GBPUSD) data.fx.GBPUSD = fb.GBPUSD;
+      if (!data.fx.USDJPY) data.fx.USDJPY = fb.USDJPY;
+      data.sources.fx = 'frankfurter.dev ECB (daily)';
+    } catch (e2) {
+      errors.push('FX fallback failed: ' + e2.message);
+    }
+  }
 
   data.ok = Boolean(data.gold && data.dxy && data.tips);
   return data;
@@ -358,7 +414,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/api/markets') {
+  const pathname = (req.url || '/').split('?')[0];
+
+  if (pathname === '/api/markets') {
     res.setHeader('Content-Type', 'application/json');
     try {
       const snapshot = await marketSnapshot();
@@ -371,7 +429,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/api/calendar') {
+  if (pathname === '/api/calendar') {
     res.setHeader('Content-Type', 'application/json');
     try {
       const events = getHighImpactCalendarEvents();
@@ -385,7 +443,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Serve HTML file
-  if (req.url === '/' || req.url === '/gold-trading.html') {
+  if (pathname === '/' || pathname === '/gold-trading.html') {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
     if (htmlContent) {
