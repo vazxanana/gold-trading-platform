@@ -4,7 +4,7 @@ An institutional-grade gold trading dashboard with live market data integration.
 
 ## Features
 
-- **Live Market Data** — Real-time gold futures (GC=F), DXY index, and 10Y TIPS yield
+- **Live Market Data** — Real-time spot gold (XAUUSD), DXY index, and 10Y TIPS yield
 - **Macro Drivers Analysis** — Fundamental scoring based on real yields, USD strength, and risk sentiment
 - **Technical Entry Points** — Calculated support/resistance levels and risk/reward targets
 - **Contingency Scenarios** — Missed-move setups and re-entry strategies
@@ -43,7 +43,7 @@ Or open `gold-trading.html` directly in your browser.
 
 The platform aggregates data from:
 
-- **Yahoo Finance** — GC=F (gold futures) and DX-Y.NYB (DXY index)
+- **Yahoo Finance** — XAUUSD (spot gold) and DX-Y.NYB (DXY index)
 - **FRED (St. Louis Fed)** — DFII10 (10-year TIPS yield)
 
 Updates every 30 seconds via the local proxy server.

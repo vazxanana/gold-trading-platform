@@ -829,7 +829,7 @@
     </div>
     <div class="price-ticker">
       <div class="ticker-item">
-        <div class="ticker-label">Gold Futures</div>
+        <div class="ticker-label">Gold (XAUUSD)</div>
         <div class="ticker-value" id="goldPrice">Loading</div>
         <div class="ticker-change" id="goldChange" style="color: var(--text-tertiary);">—</div>
       </div>
@@ -1187,7 +1187,7 @@
 
   const feeds = {
     local: proxyUrl,
-    gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
+    gold: 'https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?range=1d&interval=1m',
     dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
     tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${apiKeys.fred}&file_type=json&sort_order=desc&limit=1`
   };
