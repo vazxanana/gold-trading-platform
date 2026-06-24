@@ -1192,6 +1192,7 @@
   const state = {
     gold: null,
     dxy: null,
+    vix: null,
     tips: null,
     errors: []
   };
@@ -1362,6 +1363,10 @@
       ...snapshot.dxy,
       exchangeTime: new Date(snapshot.dxy.exchangeTime)
     } : null;
+    state.vix = snapshot.vix ? {
+      ...snapshot.vix,
+      exchangeTime: new Date(snapshot.vix.exchangeTime)
+    } : null;
     state.tips = snapshot.tips || null;
     state.errors = snapshot.errors || [];
   }
@@ -1433,66 +1438,152 @@
   function updateBias() {
     let score = 0;
     const drivers = [];
+    const metrics = {};
 
-    if (state.gold) {
-      if (state.gold.changePct > 0.15) {
-        score += 35;
-        drivers.push('Gold futures positive vs prior close');
-      } else if (state.gold.changePct > -0.15) {
-        score += 20;
-        drivers.push('Gold futures flat/neutral');
-      } else {
-        drivers.push('Gold futures negative vs prior close');
-      }
-    }
-
-    if (state.dxy) {
-      if (state.dxy.changePct < -0.10) {
-        score += 30;
-        drivers.push('DXY softer, supportive for gold');
-      } else if (state.dxy.changePct < 0.10) {
-        score += 15;
-        drivers.push('DXY neutral');
-      } else {
-        drivers.push('DXY stronger, headwind for gold');
-      }
-    }
-
+    // ==================== DRIVER 1: REAL YIELDS (TIPS) ====================
     if (state.tips) {
-      if (state.tips.value <= 1.75) {
-        score += 25;
-        drivers.push('10Y TIPS yield relatively low');
-      } else if (state.tips.value <= 2.25) {
+      const tipsVal = state.tips.value;
+      if (tipsVal < 1.5) {
+        score += 30;
+        metrics.tips = '9/10';
+        drivers.push('🔥 Negative real yields - MAJOR gold tailwind');
+      } else if (tipsVal < 2.0) {
+        score += 22;
+        metrics.tips = '7/10';
+        drivers.push('✅ Low real yields - supportive for gold');
+      } else if (tipsVal < 2.5) {
         score += 12;
-        drivers.push('10Y TIPS yield mid-range');
+        metrics.tips = '5/10';
+        drivers.push('⚖️  Mid-range real yields - neutral');
+      } else if (tipsVal < 3.0) {
+        score += 5;
+        metrics.tips = '3/10';
+        drivers.push('⚠️  Elevated yields - mild headwind');
       } else {
-        drivers.push('10Y TIPS yield elevated');
+        metrics.tips = '1/10';
+        drivers.push('❌ High real yields - strong headwind for gold');
       }
     }
 
-    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
-    const scoreText = liveCount ? `${score}%` : '—';
-    const bias = score >= 65 ? 'Bullish bias' : score >= 40 ? 'Neutral / wait' : 'Bearish caution';
-    const title = liveCount === 3 ? `${bias} from live feeds` : 'Partial live feed; use caution';
+    // ==================== DRIVER 2: USD STRENGTH (DXY) ====================
+    if (state.dxy) {
+      const dxyChange = state.dxy.changePct;
+      if (dxyChange < -0.25) {
+        score += 28;
+        metrics.dxy = '9/10';
+        drivers.push('💪 USD weakness accelerating - strong bullish');
+      } else if (dxyChange < -0.10) {
+        score += 20;
+        metrics.dxy = '7/10';
+        drivers.push('📉 USD softer - supportive for gold');
+      } else if (dxyChange < 0.10) {
+        score += 10;
+        metrics.dxy = '5/10';
+        drivers.push('➡️  USD neutral - balanced');
+      } else if (dxyChange < 0.25) {
+        score += 3;
+        metrics.dxy = '3/10';
+        drivers.push('📈 USD strengthening - mild headwind');
+      } else {
+        metrics.dxy = '1/10';
+        drivers.push('🔴 USD rally - strong headwind');
+      }
+    }
+
+    // ==================== DRIVER 3: RISK SENTIMENT (VIX) ====================
+    if (state.vix) {
+      const vixVal = state.vix.price;
+      if (vixVal > 25) {
+        score += 25;
+        metrics.vix = '9/10';
+        drivers.push('😨 High volatility - risk-on for safe-haven gold');
+      } else if (vixVal > 18) {
+        score += 18;
+        metrics.vix = '7/10';
+        drivers.push('😐 Elevated VIX - some flight-to-safety');
+      } else if (vixVal > 12) {
+        score += 8;
+        metrics.vix = '5/10';
+        drivers.push('😊 Normal volatility - baseline risk');
+      } else {
+        metrics.vix = '3/10';
+        drivers.push('🌞 Very low VIX - complacency, potential shock risk');
+      }
+    } else {
+      metrics.vix = '—';
+    }
+
+    // ==================== DRIVER 4: GOLD MOMENTUM ====================
+    if (state.gold) {
+      const goldChange = state.gold.changePct;
+      if (goldChange > 1.0) {
+        score += 15;
+        drivers.push('🚀 Gold strong momentum - break higher');
+      } else if (goldChange > 0.3) {
+        score += 10;
+        drivers.push('⬆️  Gold gaining - positive');
+      } else if (goldChange > -0.3) {
+        score += 5;
+        drivers.push('➡️  Gold flat - consolidating');
+      } else if (goldChange > -1.0) {
+        score += 2;
+        drivers.push('⬇️  Gold softer - watching');
+      } else {
+        drivers.push('🔻 Gold declining - momentum concern');
+      }
+    }
+
+    // ==================== COMPOSITE SCORING ====================
+    const maxScore = 100;
+    const normalizedScore = Math.min(Math.max(score, 0), maxScore);
+    const scoreText = normalizedScore.toFixed(0) + '%';
+
+    let bias = '';
+    let confidence = '';
+    let playbook = '';
+
+    if (normalizedScore >= 75) {
+      bias = '🟢 STRONG BULLISH';
+      confidence = 'Very High Conviction';
+      playbook = 'Macro conditions are highly supportive. Gold is in a favorable environment with negative real yields, USD weakness, and elevated risk. Bias to LONG positions. Watch for TIPS shocks or USD rally reversals.';
+    } else if (normalizedScore >= 60) {
+      bias = '🟢 BULLISH';
+      confidence = 'High Conviction';
+      playbook = 'Macro setup is constructive. Real yields remain attractive and USD has weakening pressure. Suitable for directional longs. Monitor VIX compression risk.';
+    } else if (normalizedScore >= 45) {
+      bias = '🟡 NEUTRAL / MIXED';
+      confidence = 'Medium Conviction';
+      playbook = 'Mixed macro signals. Await clarity on TIPS trajectory or USD direction. Suitable for range trading and tactical entries only. Reduce position sizing.';
+    } else if (normalizedScore >= 30) {
+      bias = '🔴 BEARISH';
+      confidence = 'Medium Caution';
+      playbook = 'Headwinds building. Real yields rising and/or USD strengthening. Be cautious with new longs. Consider waiting for pullback confirmation before entering.';
+    } else {
+      bias = '🔴 STRONG BEARISH';
+      confidence = 'High Caution';
+      playbook = 'Macro backdrop is challenging. High real yields and/or strong USD create significant headwinds. Avoid longs until conditions shift. Watch for reversal signals.';
+    }
+
+    const liveCount = [state.gold, state.dxy, state.vix, state.tips].filter(Boolean).length;
+    const statusText = liveCount === 4 ? '✅ All feeds live' : `${liveCount}/4 feeds live`;
 
     setText('biasScore', scoreText);
-    setText('biasDetail', liveCount === 3 ? 'Gold, DXY, and TIPS connected' : `${liveCount}/3 feeds connected`);
-    setText('playbookTitle', title);
-    setText('playbookCopy', drivers.length ? drivers.join('. ') + '.' : 'Waiting for live feeds.');
-    setText('directionConfidence', `Confidence: ${scoreText} live model`);
-    setText('liveDrivers', drivers.join(' • ') || 'Waiting for gold, DXY, and TIPS feeds.');
-    setText('tipsScore', state.tips ? (state.tips.value <= 1.75 ? '8/10' : state.tips.value <= 2.25 ? '5/10' : '2/10') : '—');
-    setText('dxyScore', state.dxy ? (state.dxy.changePct < -0.10 ? '8/10' : state.dxy.changePct < 0.10 ? '5/10' : '2/10') : '—');
-    setText('vixScore', 'Manual');
+    setText('biasDetail', statusText);
+    setText('playbookTitle', bias);
+    setText('playbookCopy', playbook);
+    setText('directionConfidence', confidence);
+    setText('liveDrivers', drivers.join(' • '));
+    setText('tipsScore', metrics.tips || '—');
+    setText('dxyScore', metrics.dxy || '—');
+    setText('vixScore', metrics.vix || '—');
     setText('compositeScore', scoreText);
-    setText('compositeDetail', liveCount === 3 ? `${bias.toUpperCase()} - calculated from connected feeds` : 'Not complete; one or more feeds failed');
-    setText('tipsMetricDetail', state.tips ? `Latest ${state.tips.date}: ${signed(state.tips.value)}% via FRED DFII10` : 'Latest FRED DFII10 value pending');
-    setText('dxyMetricDetail', state.dxy ? `Live DXY ${fmt(state.dxy.price)}; day change ${signed(state.dxy.changePct)}%` : 'Live DXY value pending');
+    setText('compositeDetail', `Macro conviction: ${bias}`);
+    setText('tipsMetricDetail', state.tips ? `${state.tips.value}% (${state.tips.value < 2.0 ? '✅ Bullish' : '⚠️ Headwind'})` : '—');
+    setText('dxyMetricDetail', state.dxy ? `${fmt(state.dxy.price, 2)} (${state.dxy.changePct > 0 ? '⚠️ Strength' : '✅ Weakness'})` : '—');
 
-    $('biasScore')?.classList.toggle('text-green', score >= 65);
-    $('biasScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
-    $('compositeScore')?.classList.toggle('text-green', score >= 65);
-    $('compositeScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
+    const scoreColor = normalizedScore >= 60 ? 'text-green' : normalizedScore >= 45 ? 'text-muted' : 'text-red';
+    $('biasScore')?.className = scoreColor;
+    $('compositeScore')?.className = scoreColor;
   }
 
   function updateFeedStatus() {

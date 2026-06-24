@@ -7,6 +7,7 @@ const FRED_KEY = process.env.FRED_API_KEY || '4d4ee6e804ae4c3cbe36e3678391f0ae';
 const FEEDS = {
   gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
   dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
+  vix: 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=1d&interval=1m',
   tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=1`
 };
 
@@ -74,9 +75,10 @@ function parseTips(payload) {
 
 async function marketSnapshot() {
   const errors = [];
-  const [gold, dxy, tips] = await Promise.allSettled([
+  const [gold, dxy, vix, tips] = await Promise.allSettled([
     getJson(FEEDS.gold).then((payload) => parseYahooChart(payload, 'GC=F')),
     getJson(FEEDS.dxy).then((payload) => parseYahooChart(payload, 'DXY')),
+    getJson(FEEDS.vix).then((payload) => parseYahooChart(payload, 'VIX')),
     getJson(FEEDS.tips).then(parseTips)
   ]);
 
@@ -86,10 +88,12 @@ async function marketSnapshot() {
     sources: {
       gold: 'Yahoo Finance chart API GC=F',
       dxy: 'Yahoo Finance chart API DX-Y.NYB',
+      vix: 'Yahoo Finance chart API ^VIX',
       tips: 'FRED DFII10'
     },
     gold: null,
     dxy: null,
+    vix: null,
     tips: null,
     errors
   };
@@ -116,6 +120,12 @@ async function marketSnapshot() {
       changePct: 0.125,
       exchangeTime: new Date().toISOString()
     };
+  }
+
+  if (vix.status === 'fulfilled') {
+    data.vix = vix.value;
+  } else {
+    errors.push('VIX API: ' + (vix.reason ? vix.reason.message : 'Unknown error'));
   }
 
   if (tips.status === 'fulfilled') data.tips = tips.value;
