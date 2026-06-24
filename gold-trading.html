@@ -1210,7 +1210,7 @@
 
   // Support both local and hosted proxy
   const proxyUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://127.0.0.1:8787/api/markets'
+    ? `http://${window.location.hostname}:8787/api/markets`
     : 'https://gold-trading-platform-production.up.railway.app/api/markets';
 
   const feeds = {
