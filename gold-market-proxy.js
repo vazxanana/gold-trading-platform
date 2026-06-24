@@ -137,6 +137,6 @@ const server = http.createServer(async (req, res) => {
   res.end('Gold market proxy running. Use /api/markets');
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Gold market proxy running at http://127.0.0.1:${PORT}/api/markets`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Gold market proxy running at http://0.0.0.0:${PORT}/api/markets`);
 });
