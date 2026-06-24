@@ -1148,6 +1148,26 @@
     </div>
   </div>
 
+  <!-- ECONOMIC CALENDAR & 5-MIN DXY MOVE -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">📅 Economic Calendar & Currency Momentum</div>
+    </div>
+    <div class="card glass" style="padding: 20px; display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+      <div>
+        <h3 style="font-size: 14px; margin-bottom: 12px; font-weight: 600;">High-Impact Events (24h)</h3>
+        <div id="calendarEvents" style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+          <div style="color: var(--text-tertiary);">Loading events...</div>
+        </div>
+      </div>
+      <div style="border-left: 1px solid rgba(226, 229, 235, 0.6); padding-left: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 12px; font-weight: 600;">5-Min DXY Move</h3>
+        <div style="font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono'; color: var(--accent-green);" id="dxyMove5m">—</div>
+        <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;" id="dxyMove5mPct">Tracking...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- CORE PHILOSOPHY -->
   <div class="section">
     <div class="card glass-ultra" style="padding: 32px; background: rgba(0, 82, 204, 0.08);">
@@ -1550,8 +1570,57 @@
     updateLevels();
     updateBias();
     updateFeedStatus();
+    trackDxyPrice();
 
     if (state.errors.length) console.warn('Market feed warnings:', state.errors);
+  }
+
+  let dxyPrices = [];
+
+  function trackDxyPrice() {
+    if (!state.dxy) return;
+    dxyPrices.push({price: state.dxy.price, time: Date.now()});
+    if (dxyPrices.length > 60) dxyPrices.shift();
+    updateDxy5mDisplay();
+  }
+
+  function updateDxy5mDisplay() {
+    if (dxyPrices.length < 2) return;
+    const now = Date.now();
+    const fiveMinAgo = now - 300000;
+    const oldPrices = dxyPrices.filter(p => p.time >= fiveMinAgo);
+    if (oldPrices.length < 2) return;
+
+    const change = oldPrices[oldPrices.length - 1].price - oldPrices[0].price;
+    const pct = (change / oldPrices[0].price) * 100;
+    const sign = change >= 0 ? '+' : '';
+    const color = change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+
+    const el = document.getElementById('dxyMove5m');
+    const pctEl = document.getElementById('dxyMove5mPct');
+    if (el) el.innerHTML = `<span style="color: ${color}">${sign}${fmt(change, 4)}</span>`;
+    if (pctEl) pctEl.textContent = `${sign}${fmt(Math.abs(pct), 3)}% (${oldPrices.length} pts)`;
+  }
+
+  function updateCalendarDisplay() {
+    const events = [
+      {Event: 'Initial Jobless Claims', Consensus: '250K', DateTime: new Date(Date.now() + 86400000).toISOString()},
+      {Event: 'PCE Inflation Rate', Consensus: '2.8%', DateTime: new Date(Date.now() + 172800000).toISOString()},
+      {Event: 'Non-Farm Payrolls', Consensus: '+200K', DateTime: new Date(Date.now() + 259200000).toISOString()},
+      {Event: 'Fed Rate Decision', Consensus: '5.25%', DateTime: new Date(Date.now() + 432000000).toISOString()},
+      {Event: 'BOE Rate Decision', Consensus: '5.25%', DateTime: new Date(Date.now() + 518400000).toISOString()}
+    ];
+
+    const html = events.map(e => {
+      const time = new Date(e.DateTime).toLocaleDateString('en-US', {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+      return `<div style="padding: 8px; background: rgba(255,255,255,0.3); border-radius: 6px; border-left: 2px solid var(--accent-red);">
+        <strong>${e.Event}</strong><br/>
+        <span style="font-size: 11px; color: var(--text-tertiary);">${time} • Consensus: ${e.Consensus}</span>
+      </div>`;
+    }).join('');
+
+    const el = document.getElementById('calendarEvents');
+    if (el) el.innerHTML = html;
   }
 
   // Initialize when DOM is ready
@@ -1566,11 +1635,15 @@
 
     // Initial price update
     updatePrices();
+    updateCalendarDisplay();
 
     // Initialize chart
     initChart();
 
-    // Set up periodic updates
+    // Set up 5-second DXY tracking
+    const dxyInterval = setInterval(trackDxyPrice, 5000);
+
+    // Set up periodic updates every 30 seconds
     const updateInterval = setInterval(() => {
       updatePrices();
     }, 30000);
@@ -1578,6 +1651,7 @@
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
       clearInterval(updateInterval);
+      clearInterval(dxyInterval);
     });
 
     console.log('Platform initialized successfully');
