@@ -107,10 +107,10 @@ async function marketSnapshot() {
     data.gold = {
       label: 'GC=F',
       symbol: 'GC=F',
-      price: 2425.50,
-      previousClose: 2420.00,
-      change: 5.50,
-      changePct: 0.227,
+      price: 4000.30,
+      previousClose: 4149.40,
+      change: -149.10,
+      changePct: -3.593,
       exchangeTime: new Date().toISOString()
     };
   }
