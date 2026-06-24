@@ -1180,8 +1180,13 @@
     fred: localStorage.getItem('fred_api_key') || '4d4ee6e804ae4c3cbe36e3678391f0ae',
   };
 
+  // Support both local and hosted proxy
+  const proxyUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://127.0.0.1:8787/api/markets'
+    : (window.__PROXY_URL__ || 'https://gold-market-proxy.onrender.com/api/markets');
+
   const feeds = {
-    local: 'http://127.0.0.1:8787/api/markets',
+    local: proxyUrl,
     gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
     dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
     tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${apiKeys.fred}&file_type=json&sort_order=desc&limit=1`

@@ -1,0 +1,13 @@
+{
+  "name": "gold-trading-platform",
+  "version": 2,
+  "public": true,
+  "buildCommand": "echo 'Static site - no build needed'",
+  "outputDirectory": ".",
+  "routes": [
+    {
+      "src": "^/(?!api).*",
+      "dest": "/gold-trading.html"
+    }
+  ]
+}
