@@ -147,54 +147,113 @@ async function marketSnapshot() {
 function getHighImpactCalendarEvents() {
   const now = new Date();
   const events = [
+    // Past 2 weeks (sorted by recency)
     {
       Country: 'United States',
-      Event: 'FOMC Interest Rate Decision',
-      DateTime: new Date(now.getTime() + 86400000 * 3).toISOString(),
+      Event: 'CPI (Core YoY)',
+      DateTime: new Date(now.getTime() - 10 * 86400000).toISOString(),
       Importance: '3',
-      Consensus: '5.25-5.50%',
-      Previous: '5.25-5.50%'
+      Consensus: '3.6%',
+      Previous: '3.7%',
+      Actual: '3.5%'
+    },
+    {
+      Country: 'United States',
+      Event: 'PPI Inflation',
+      DateTime: new Date(now.getTime() - 8 * 86400000).toISOString(),
+      Importance: '3',
+      Consensus: '2.8%',
+      Previous: '2.9%',
+      Actual: '2.7%'
+    },
+    {
+      Country: 'Eurozone',
+      Event: 'ECB Interest Rate',
+      DateTime: new Date(now.getTime() - 6 * 86400000).toISOString(),
+      Importance: '3',
+      Consensus: '4.25%',
+      Previous: '4.25%',
+      Actual: '4.25%'
+    },
+    {
+      Country: 'United Kingdom',
+      Event: 'UK Retail Sales',
+      DateTime: new Date(now.getTime() - 4 * 86400000).toISOString(),
+      Importance: '3',
+      Consensus: '+0.8%',
+      Previous: '+1.2%',
+      Actual: '+0.5%'
+    },
+    {
+      Country: 'United States',
+      Event: 'Weekly Jobless Claims',
+      DateTime: new Date(now.getTime() - 2 * 86400000).toISOString(),
+      Importance: '3',
+      Consensus: '245K',
+      Previous: '242K',
+      Actual: '248K'
+    },
+    // Next events
+    {
+      Country: 'United States',
+      Event: 'Retail Sales (Core)',
+      DateTime: new Date(now.getTime() + 2 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '+0.3%',
+      Previous: '+0.1%'
+    },
+    {
+      Country: 'United States',
+      Event: 'Producer Price Index',
+      DateTime: new Date(now.getTime() + 5 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '+0.1%',
+      Previous: '+0.2%'
     },
     {
       Country: 'United States',
       Event: 'Initial Jobless Claims',
-      DateTime: new Date(now.getTime() + 3600000 * 4).toISOString(),
+      DateTime: new Date(now.getTime() + 24 * 3600000).toISOString(),
       Importance: '3',
       Consensus: '250K',
-      Previous: '242K'
+      Previous: '248K'
     },
     {
       Country: 'United States',
       Event: 'PCE Inflation Rate (YoY)',
-      DateTime: new Date(now.getTime() + 3600000 * 6).toISOString(),
+      DateTime: new Date(now.getTime() + 36 * 3600000).toISOString(),
       Importance: '3',
       Consensus: '2.8%',
       Previous: '2.9%'
     },
     {
       Country: 'United States',
-      Event: 'Non-Farm Payrolls',
-      DateTime: new Date(now.getTime() + 86400000).toISOString(),
+      Event: 'FOMC Interest Rate Decision',
+      DateTime: new Date(now.getTime() + 72 * 3600000).toISOString(),
       Importance: '3',
-      Consensus: '+200K',
-      Previous: '+227K'
+      Consensus: '5.25-5.50%',
+      Previous: '5.25-5.50%'
     },
     {
       Country: 'United Kingdom',
       Event: 'Bank of England Rate Decision',
-      DateTime: new Date(now.getTime() + 3600000 * 48).toISOString(),
+      DateTime: new Date(now.getTime() + 96 * 3600000).toISOString(),
       Importance: '3',
       Consensus: '5.25%',
       Previous: '5.25%'
     }
   ];
 
-  const inNext24h = events.filter(e => {
-    const eventTime = new Date(e.DateTime);
-    return eventTime > now && eventTime < new Date(now.getTime() + 86400000);
+  // Return all events sorted by relevance (closest to current time first)
+  const sortedEvents = events.sort((a, b) => {
+    const timeA = new Date(a.DateTime).getTime();
+    const timeB = new Date(b.DateTime).getTime();
+    const distA = Math.abs(timeA - now.getTime());
+    const distB = Math.abs(timeB - now.getTime());
+    return distA - distB;
   });
 
-  return inNext24h.length > 0 ? inNext24h : events.slice(0, 3);
+  return sortedEvents.slice(0, 8);
 }
 
 const server = http.createServer(async (req, res) => {
