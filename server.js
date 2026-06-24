@@ -296,17 +296,40 @@ const server = http.createServer(async (req, res) => {
 
   // Serve HTML file
   if (req.url === '/' || req.url === '/gold-trading.html') {
-    res.setHeader('Content-Type', 'text/html');
-    const htmlPath = path.join(__dirname, 'gold-trading.html');
-    fs.readFile(htmlPath, 'utf8', (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end('File not found');
-        return;
-      }
-      res.writeHead(200);
-      res.end(data);
-    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+    // Try multiple paths to find the HTML file
+    const possiblePaths = [
+      path.join(__dirname, 'gold-trading.html'),
+      path.join(process.cwd(), 'gold-trading.html'),
+      './gold-trading.html',
+      '/app/gold-trading.html'
+    ];
+
+    let htmlPath = null;
+    for (const p of possiblePaths) {
+      try {
+        if (fs.existsSync(p)) {
+          htmlPath = p;
+          break;
+        }
+      } catch (e) {}
+    }
+
+    if (htmlPath) {
+      fs.readFile(htmlPath, 'utf8', (err, data) => {
+        if (err) {
+          res.writeHead(500);
+          res.end('Error reading HTML file');
+          return;
+        }
+        res.writeHead(200);
+        res.end(data);
+      });
+    } else {
+      res.writeHead(404);
+      res.end('HTML file not found at any path');
+    }
     return;
   }
 
