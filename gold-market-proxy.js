@@ -5,7 +5,7 @@ const PORT = Number(process.env.PORT || 8787);
 const FRED_KEY = process.env.FRED_API_KEY || '4d4ee6e804ae4c3cbe36e3678391f0ae';
 
 const FEEDS = {
-  gold: 'https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?range=1d&interval=1m',
+  gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
   dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
   tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=1`
 };
@@ -98,16 +98,8 @@ async function marketSnapshot() {
     data.gold = gold.value;
   } else {
     errors.push('Gold API: ' + (gold.reason ? gold.reason.message : 'Unknown error'));
-    // Fallback gold data for dashboard functionality
-    data.gold = {
-      label: 'XAUUSD',
-      symbol: 'XAUUSD=X',
-      price: 2435.75,
-      previousClose: 2432.50,
-      change: 3.25,
-      changePct: 0.134,
-      exchangeTime: new Date().toISOString()
-    };
+    // No fallback - only show real data or error
+    // Gold API is critical for dashboard
   }
 
   if (dxy.status === 'fulfilled') {
