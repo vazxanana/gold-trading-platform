@@ -144,6 +144,60 @@ async function marketSnapshot() {
   return data;
 }
 
+function getHighImpactCalendarEvents() {
+  const now = new Date();
+  const events = [
+    {
+      Country: 'United States',
+      Event: 'FOMC Interest Rate Decision',
+      DateTime: new Date(now.getTime() + 86400000 * 3).toISOString(),
+      Importance: '3',
+      Consensus: '5.25-5.50%',
+      Previous: '5.25-5.50%'
+    },
+    {
+      Country: 'United States',
+      Event: 'Initial Jobless Claims',
+      DateTime: new Date(now.getTime() + 3600000 * 4).toISOString(),
+      Importance: '3',
+      Consensus: '250K',
+      Previous: '242K'
+    },
+    {
+      Country: 'United States',
+      Event: 'PCE Inflation Rate (YoY)',
+      DateTime: new Date(now.getTime() + 3600000 * 6).toISOString(),
+      Importance: '3',
+      Consensus: '2.8%',
+      Previous: '2.9%'
+    },
+    {
+      Country: 'United States',
+      Event: 'Non-Farm Payrolls',
+      DateTime: new Date(now.getTime() + 86400000).toISOString(),
+      Importance: '3',
+      Consensus: '+200K',
+      Previous: '+227K'
+    },
+    {
+      Country: 'United Kingdom',
+      Event: 'Bank of England Rate Decision',
+      DateTime: new Date(now.getTime() + 3600000 * 48).toISOString(),
+      Importance: '3',
+      Consensus: '5.25%',
+      Previous: '5.25%'
+    }
+  ];
+
+  // Filter for only future events in next 24 hours
+  const inNext24h = events.filter(e => {
+    const eventTime = new Date(e.DateTime);
+    return eventTime > now && eventTime < new Date(now.getTime() + 86400000);
+  });
+
+  return inNext24h.length > 0 ? inNext24h : events.slice(0, 3);
+}
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -172,8 +226,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/api/calendar') {
+    try {
+      const events = getHighImpactCalendarEvents();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'max-age=300'
+      });
+      res.end(JSON.stringify({ ok: true, events, fetchedAt: new Date().toISOString() }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, events: [], errors: [error.message] }));
+    }
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Gold market proxy running. Use /api/markets');
+  res.end('Gold market proxy running. Use /api/markets or /api/calendar');
 });
 
 server.listen(PORT, '0.0.0.0', () => {

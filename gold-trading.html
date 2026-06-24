@@ -1148,6 +1148,34 @@
     </div>
   </div>
 
+  <!-- ECONOMIC CALENDAR & CURRENCY MOMENTUM -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">📅 Economic Calendar & Currency Momentum</div>
+    </div>
+
+    <div class="card glass">
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; align-items: stretch;">
+        <div>
+          <h3>High-Impact Events (Next 24h)</h3>
+          <div id="economicCalendar" style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; color: var(--text-tertiary); text-align: center;">
+              Loading economic calendar...
+            </div>
+          </div>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,0.3); padding-left: 24px;">
+          <h3>5-Minute Currency Move</h3>
+          <div class="metric-box" style="background: rgba(0,166,81,0.1); border-color: rgba(0,166,81,0.3);">
+            <div class="metric-label">DXY Change (5m)</div>
+            <div class="metric-value" id="dxyMove5m" style="font-size: 32px;">—</div>
+            <div class="metric-detail" id="dxyMove5mDetail">Tracking last 5 minutes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- CORE PHILOSOPHY -->
   <div class="section">
     <div class="card glass-ultra" style="padding: 32px; background: rgba(0, 82, 204, 0.08);">
@@ -1196,6 +1224,15 @@
     tips: null,
     errors: []
   };
+
+  // 5-minute DXY movement tracking
+  let dxyHistory = [];
+  const DXY_HISTORY_INTERVAL = 5000; // 5 seconds
+  const MAX_HISTORY_POINTS = 60; // 5 minutes worth
+
+  // Economic calendar cache
+  let calendarEvents = [];
+  const CALENDAR_FETCH_INTERVAL = 600000; // 10 minutes
 
   let chartAttempts = 0;
   const maxChartAttempts = 15;
@@ -1645,6 +1682,110 @@
     if (state.errors.length) console.warn('Market feed warnings:', state.errors);
   }
 
+  // Track DXY movement over 5 minutes
+  function trackDxyMovement() {
+    if (!state.dxy || !state.dxy.price) return;
+
+    const timestamp = Date.now();
+    dxyHistory.push({
+      price: state.dxy.price,
+      timestamp
+    });
+
+    // Keep only last 5 minutes of history (adjust based on update frequency)
+    if (dxyHistory.length > MAX_HISTORY_POINTS) {
+      dxyHistory.shift();
+    }
+
+    updateDxy5mDisplay();
+  }
+
+  // Calculate 5-minute DXY movement
+  function calculateDxy5mChange() {
+    if (dxyHistory.length < 2) return { change: 0, changePct: 0 };
+
+    const currentPrice = dxyHistory[dxyHistory.length - 1].price;
+    const oldestPrice = dxyHistory[0].price;
+
+    const change = currentPrice - oldestPrice;
+    const changePct = (change / oldestPrice) * 100;
+
+    return { change, changePct };
+  }
+
+  // Update 5-minute DXY display
+  function updateDxy5mDisplay() {
+    const { change, changePct } = calculateDxy5mChange();
+    const move5mEl = $('dxyMove5m');
+    const move5mDetailEl = $('dxyMove5mDetail');
+
+    if (move5mEl) {
+      const sign = change >= 0 ? '+' : '';
+      const color = change >= 0 ? 'color: var(--accent-green)' : 'color: var(--accent-red)';
+      move5mEl.innerHTML = `<span style="${color}">${sign}${fmt(change, 4)}</span>`;
+    }
+
+    if (move5mDetailEl) {
+      move5mDetailEl.textContent = `${dxyHistory.length > 1 ? fmt(Math.abs(changePct), 3) : '—'}% (${dxyHistory.length} samples)`;
+    }
+  }
+
+  // Fetch high-impact economic calendar events
+  async function fetchEconomicCalendar() {
+    try {
+      // Determine calendar endpoint based on proxy URL
+      const calendarUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://127.0.0.1:8787/api/calendar'
+        : 'https://gold-trading-platform-production.up.railway.app/api/calendar';
+
+      const response = await fetch(calendarUrl, {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) throw new Error(`Calendar API returned ${response.status}`);
+
+      const data = await response.json();
+      calendarEvents = (data.events || [])
+        .sort((a, b) => new Date(a.DateTime) - new Date(b.DateTime))
+        .slice(0, 5);
+
+      updateCalendarDisplay();
+    } catch (error) {
+      console.warn('Economic calendar fetch failed:', error.message);
+      updateCalendarDisplay();
+    }
+  }
+
+  // Display economic calendar
+  function updateCalendarDisplay() {
+    const calendarEl = $('economicCalendar');
+    if (!calendarEl) return;
+
+    if (calendarEvents.length === 0) {
+      calendarEl.innerHTML = '<div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; color: var(--text-tertiary); text-align: center;">No high-impact events in next 24 hours</div>';
+      return;
+    }
+
+    calendarEl.innerHTML = calendarEvents.map(event => {
+      const eventTime = new Date(event.DateTime);
+      const timeStr = eventTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const consensus = event.Consensus || '—';
+      const isUSA = event.Country === 'United States' ? '🇺🇸' : event.Country === 'United Kingdom' ? '🇬🇧' : '🌍';
+
+      return `
+        <div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; border-left: 3px solid var(--accent-red);">
+          <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${isUSA} ${event.Event}</div>
+          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
+            <div>⏰ ${timeStr} — Consensus: <strong>${consensus}</strong></div>
+            ${event.Previous ? `<div>Previous: ${event.Previous}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
@@ -1658,17 +1799,33 @@
     // Initial price update
     updatePrices();
 
+    // Fetch economic calendar
+    fetchEconomicCalendar();
+
     // Initialize chart
     initChart();
 
-    // Set up periodic updates
+    // Set up 5-second DXY tracking interval
+    const dxyTrackInterval = setInterval(() => {
+      trackDxyMovement();
+    }, DXY_HISTORY_INTERVAL);
+
+    // Set up 30-second price update interval
     const updateInterval = setInterval(() => {
       updatePrices();
+      trackDxyMovement();
     }, 30000);
+
+    // Set up 10-minute calendar refresh interval
+    const calendarInterval = setInterval(() => {
+      fetchEconomicCalendar();
+    }, CALENDAR_FETCH_INTERVAL);
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
+      clearInterval(dxyTrackInterval);
       clearInterval(updateInterval);
+      clearInterval(calendarInterval);
     });
 
     console.log('Platform initialized successfully');
