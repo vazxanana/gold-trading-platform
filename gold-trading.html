@@ -1148,34 +1148,6 @@
     </div>
   </div>
 
-  <!-- ECONOMIC CALENDAR & CURRENCY MOMENTUM -->
-  <div class="section">
-    <div class="section-header">
-      <div class="section-title">📅 Economic Calendar & Currency Momentum</div>
-    </div>
-
-    <div class="card glass">
-      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; align-items: stretch;">
-        <div>
-          <h3>High-Impact Events (Next 24h)</h3>
-          <div id="economicCalendar" style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; color: var(--text-tertiary); text-align: center;">
-              Loading economic calendar...
-            </div>
-          </div>
-        </div>
-        <div style="border-left: 1px solid rgba(255,255,255,0.3); padding-left: 24px;">
-          <h3>5-Minute Currency Move</h3>
-          <div class="metric-box" style="background: rgba(0,166,81,0.1); border-color: rgba(0,166,81,0.3);">
-            <div class="metric-label">DXY Change (5m)</div>
-            <div class="metric-value" id="dxyMove5m" style="font-size: 32px;">—</div>
-            <div class="metric-detail" id="dxyMove5mDetail">Tracking last 5 minutes</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- CORE PHILOSOPHY -->
   <div class="section">
     <div class="card glass-ultra" style="padding: 32px; background: rgba(0, 82, 204, 0.08);">
@@ -1210,7 +1182,7 @@
 
   // Support both local and hosted proxy
   const proxyUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? `http://${window.location.hostname}:8787/api/markets`
+    ? 'http://127.0.0.1:8787/api/markets'
     : 'https://gold-trading-platform-production.up.railway.app/api/markets';
 
   const feeds = {
@@ -1220,19 +1192,9 @@
   const state = {
     gold: null,
     dxy: null,
-    vix: null,
     tips: null,
     errors: []
   };
-
-  // 5-minute DXY movement tracking
-  let dxyHistory = [];
-  const DXY_HISTORY_INTERVAL = 5000; // 5 seconds
-  const MAX_HISTORY_POINTS = 60; // 5 minutes worth
-
-  // Economic calendar cache
-  let calendarEvents = [];
-  const CALENDAR_FETCH_INTERVAL = 600000; // 10 minutes
 
   let chartAttempts = 0;
   const maxChartAttempts = 15;
@@ -1400,10 +1362,6 @@
       ...snapshot.dxy,
       exchangeTime: new Date(snapshot.dxy.exchangeTime)
     } : null;
-    state.vix = snapshot.vix ? {
-      ...snapshot.vix,
-      exchangeTime: new Date(snapshot.vix.exchangeTime)
-    } : null;
     state.tips = snapshot.tips || null;
     state.errors = snapshot.errors || [];
   }
@@ -1475,152 +1433,66 @@
   function updateBias() {
     let score = 0;
     const drivers = [];
-    const metrics = {};
 
-    // ==================== DRIVER 1: REAL YIELDS (TIPS) ====================
-    if (state.tips) {
-      const tipsVal = state.tips.value;
-      if (tipsVal < 1.5) {
-        score += 30;
-        metrics.tips = '9/10';
-        drivers.push('🔥 Negative real yields - MAJOR gold tailwind');
-      } else if (tipsVal < 2.0) {
-        score += 22;
-        metrics.tips = '7/10';
-        drivers.push('✅ Low real yields - supportive for gold');
-      } else if (tipsVal < 2.5) {
-        score += 12;
-        metrics.tips = '5/10';
-        drivers.push('⚖️  Mid-range real yields - neutral');
-      } else if (tipsVal < 3.0) {
-        score += 5;
-        metrics.tips = '3/10';
-        drivers.push('⚠️  Elevated yields - mild headwind');
-      } else {
-        metrics.tips = '1/10';
-        drivers.push('❌ High real yields - strong headwind for gold');
-      }
-    }
-
-    // ==================== DRIVER 2: USD STRENGTH (DXY) ====================
-    if (state.dxy) {
-      const dxyChange = state.dxy.changePct;
-      if (dxyChange < -0.25) {
-        score += 28;
-        metrics.dxy = '9/10';
-        drivers.push('💪 USD weakness accelerating - strong bullish');
-      } else if (dxyChange < -0.10) {
-        score += 20;
-        metrics.dxy = '7/10';
-        drivers.push('📉 USD softer - supportive for gold');
-      } else if (dxyChange < 0.10) {
-        score += 10;
-        metrics.dxy = '5/10';
-        drivers.push('➡️  USD neutral - balanced');
-      } else if (dxyChange < 0.25) {
-        score += 3;
-        metrics.dxy = '3/10';
-        drivers.push('📈 USD strengthening - mild headwind');
-      } else {
-        metrics.dxy = '1/10';
-        drivers.push('🔴 USD rally - strong headwind');
-      }
-    }
-
-    // ==================== DRIVER 3: RISK SENTIMENT (VIX) ====================
-    if (state.vix) {
-      const vixVal = state.vix.price;
-      if (vixVal > 25) {
-        score += 25;
-        metrics.vix = '9/10';
-        drivers.push('😨 High volatility - risk-on for safe-haven gold');
-      } else if (vixVal > 18) {
-        score += 18;
-        metrics.vix = '7/10';
-        drivers.push('😐 Elevated VIX - some flight-to-safety');
-      } else if (vixVal > 12) {
-        score += 8;
-        metrics.vix = '5/10';
-        drivers.push('😊 Normal volatility - baseline risk');
-      } else {
-        metrics.vix = '3/10';
-        drivers.push('🌞 Very low VIX - complacency, potential shock risk');
-      }
-    } else {
-      metrics.vix = '—';
-    }
-
-    // ==================== DRIVER 4: GOLD MOMENTUM ====================
     if (state.gold) {
-      const goldChange = state.gold.changePct;
-      if (goldChange > 1.0) {
-        score += 15;
-        drivers.push('🚀 Gold strong momentum - break higher');
-      } else if (goldChange > 0.3) {
-        score += 10;
-        drivers.push('⬆️  Gold gaining - positive');
-      } else if (goldChange > -0.3) {
-        score += 5;
-        drivers.push('➡️  Gold flat - consolidating');
-      } else if (goldChange > -1.0) {
-        score += 2;
-        drivers.push('⬇️  Gold softer - watching');
+      if (state.gold.changePct > 0.15) {
+        score += 35;
+        drivers.push('Gold futures positive vs prior close');
+      } else if (state.gold.changePct > -0.15) {
+        score += 20;
+        drivers.push('Gold futures flat/neutral');
       } else {
-        drivers.push('🔻 Gold declining - momentum concern');
+        drivers.push('Gold futures negative vs prior close');
       }
     }
 
-    // ==================== COMPOSITE SCORING ====================
-    const maxScore = 100;
-    const normalizedScore = Math.min(Math.max(score, 0), maxScore);
-    const scoreText = normalizedScore.toFixed(0) + '%';
-
-    let bias = '';
-    let confidence = '';
-    let playbook = '';
-
-    if (normalizedScore >= 75) {
-      bias = '🟢 STRONG BULLISH';
-      confidence = 'Very High Conviction';
-      playbook = 'Macro conditions are highly supportive. Gold is in a favorable environment with negative real yields, USD weakness, and elevated risk. Bias to LONG positions. Watch for TIPS shocks or USD rally reversals.';
-    } else if (normalizedScore >= 60) {
-      bias = '🟢 BULLISH';
-      confidence = 'High Conviction';
-      playbook = 'Macro setup is constructive. Real yields remain attractive and USD has weakening pressure. Suitable for directional longs. Monitor VIX compression risk.';
-    } else if (normalizedScore >= 45) {
-      bias = '🟡 NEUTRAL / MIXED';
-      confidence = 'Medium Conviction';
-      playbook = 'Mixed macro signals. Await clarity on TIPS trajectory or USD direction. Suitable for range trading and tactical entries only. Reduce position sizing.';
-    } else if (normalizedScore >= 30) {
-      bias = '🔴 BEARISH';
-      confidence = 'Medium Caution';
-      playbook = 'Headwinds building. Real yields rising and/or USD strengthening. Be cautious with new longs. Consider waiting for pullback confirmation before entering.';
-    } else {
-      bias = '🔴 STRONG BEARISH';
-      confidence = 'High Caution';
-      playbook = 'Macro backdrop is challenging. High real yields and/or strong USD create significant headwinds. Avoid longs until conditions shift. Watch for reversal signals.';
+    if (state.dxy) {
+      if (state.dxy.changePct < -0.10) {
+        score += 30;
+        drivers.push('DXY softer, supportive for gold');
+      } else if (state.dxy.changePct < 0.10) {
+        score += 15;
+        drivers.push('DXY neutral');
+      } else {
+        drivers.push('DXY stronger, headwind for gold');
+      }
     }
 
-    const liveCount = [state.gold, state.dxy, state.vix, state.tips].filter(Boolean).length;
-    const statusText = liveCount === 4 ? '✅ All feeds live' : `${liveCount}/4 feeds live`;
+    if (state.tips) {
+      if (state.tips.value <= 1.75) {
+        score += 25;
+        drivers.push('10Y TIPS yield relatively low');
+      } else if (state.tips.value <= 2.25) {
+        score += 12;
+        drivers.push('10Y TIPS yield mid-range');
+      } else {
+        drivers.push('10Y TIPS yield elevated');
+      }
+    }
+
+    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
+    const scoreText = liveCount ? `${score}%` : '—';
+    const bias = score >= 65 ? 'Bullish bias' : score >= 40 ? 'Neutral / wait' : 'Bearish caution';
+    const title = liveCount === 3 ? `${bias} from live feeds` : 'Partial live feed; use caution';
 
     setText('biasScore', scoreText);
-    setText('biasDetail', statusText);
-    setText('playbookTitle', bias);
-    setText('playbookCopy', playbook);
-    setText('directionConfidence', confidence);
-    setText('liveDrivers', drivers.join(' • '));
-    setText('tipsScore', metrics.tips || '—');
-    setText('dxyScore', metrics.dxy || '—');
-    setText('vixScore', metrics.vix || '—');
+    setText('biasDetail', liveCount === 3 ? 'Gold, DXY, and TIPS connected' : `${liveCount}/3 feeds connected`);
+    setText('playbookTitle', title);
+    setText('playbookCopy', drivers.length ? drivers.join('. ') + '.' : 'Waiting for live feeds.');
+    setText('directionConfidence', `Confidence: ${scoreText} live model`);
+    setText('liveDrivers', drivers.join(' • ') || 'Waiting for gold, DXY, and TIPS feeds.');
+    setText('tipsScore', state.tips ? (state.tips.value <= 1.75 ? '8/10' : state.tips.value <= 2.25 ? '5/10' : '2/10') : '—');
+    setText('dxyScore', state.dxy ? (state.dxy.changePct < -0.10 ? '8/10' : state.dxy.changePct < 0.10 ? '5/10' : '2/10') : '—');
+    setText('vixScore', 'Manual');
     setText('compositeScore', scoreText);
-    setText('compositeDetail', `Macro conviction: ${bias}`);
-    setText('tipsMetricDetail', state.tips ? `${state.tips.value}% (${state.tips.value < 2.0 ? '✅ Bullish' : '⚠️ Headwind'})` : '—');
-    setText('dxyMetricDetail', state.dxy ? `${fmt(state.dxy.price, 2)} (${state.dxy.changePct > 0 ? '⚠️ Strength' : '✅ Weakness'})` : '—');
+    setText('compositeDetail', liveCount === 3 ? `${bias.toUpperCase()} - calculated from connected feeds` : 'Not complete; one or more feeds failed');
+    setText('tipsMetricDetail', state.tips ? `Latest ${state.tips.date}: ${signed(state.tips.value)}% via FRED DFII10` : 'Latest FRED DFII10 value pending');
+    setText('dxyMetricDetail', state.dxy ? `Live DXY ${fmt(state.dxy.price)}; day change ${signed(state.dxy.changePct)}%` : 'Live DXY value pending');
 
-    const scoreColor = normalizedScore >= 60 ? 'text-green' : normalizedScore >= 45 ? 'text-muted' : 'text-red';
-    $('biasScore')?.className = scoreColor;
-    $('compositeScore')?.className = scoreColor;
+    $('biasScore')?.classList.toggle('text-green', score >= 65);
+    $('biasScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
+    $('compositeScore')?.classList.toggle('text-green', score >= 65);
+    $('compositeScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
   }
 
   function updateFeedStatus() {
@@ -1682,110 +1554,6 @@
     if (state.errors.length) console.warn('Market feed warnings:', state.errors);
   }
 
-  // Track DXY movement over 5 minutes
-  function trackDxyMovement() {
-    if (!state.dxy || !state.dxy.price) return;
-
-    const timestamp = Date.now();
-    dxyHistory.push({
-      price: state.dxy.price,
-      timestamp
-    });
-
-    // Keep only last 5 minutes of history (adjust based on update frequency)
-    if (dxyHistory.length > MAX_HISTORY_POINTS) {
-      dxyHistory.shift();
-    }
-
-    updateDxy5mDisplay();
-  }
-
-  // Calculate 5-minute DXY movement
-  function calculateDxy5mChange() {
-    if (dxyHistory.length < 2) return { change: 0, changePct: 0 };
-
-    const currentPrice = dxyHistory[dxyHistory.length - 1].price;
-    const oldestPrice = dxyHistory[0].price;
-
-    const change = currentPrice - oldestPrice;
-    const changePct = (change / oldestPrice) * 100;
-
-    return { change, changePct };
-  }
-
-  // Update 5-minute DXY display
-  function updateDxy5mDisplay() {
-    const { change, changePct } = calculateDxy5mChange();
-    const move5mEl = $('dxyMove5m');
-    const move5mDetailEl = $('dxyMove5mDetail');
-
-    if (move5mEl) {
-      const sign = change >= 0 ? '+' : '';
-      const color = change >= 0 ? 'color: var(--accent-green)' : 'color: var(--accent-red)';
-      move5mEl.innerHTML = `<span style="${color}">${sign}${fmt(change, 4)}</span>`;
-    }
-
-    if (move5mDetailEl) {
-      move5mDetailEl.textContent = `${dxyHistory.length > 1 ? fmt(Math.abs(changePct), 3) : '—'}% (${dxyHistory.length} samples)`;
-    }
-  }
-
-  // Fetch high-impact economic calendar events
-  async function fetchEconomicCalendar() {
-    try {
-      // Determine calendar endpoint based on proxy URL
-      const calendarUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://127.0.0.1:8787/api/calendar'
-        : 'https://gold-trading-platform-production.up.railway.app/api/calendar';
-
-      const response = await fetch(calendarUrl, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
-      if (!response.ok) throw new Error(`Calendar API returned ${response.status}`);
-
-      const data = await response.json();
-      calendarEvents = (data.events || [])
-        .sort((a, b) => new Date(a.DateTime) - new Date(b.DateTime))
-        .slice(0, 5);
-
-      updateCalendarDisplay();
-    } catch (error) {
-      console.warn('Economic calendar fetch failed:', error.message);
-      updateCalendarDisplay();
-    }
-  }
-
-  // Display economic calendar
-  function updateCalendarDisplay() {
-    const calendarEl = $('economicCalendar');
-    if (!calendarEl) return;
-
-    if (calendarEvents.length === 0) {
-      calendarEl.innerHTML = '<div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; color: var(--text-tertiary); text-align: center;">No high-impact events in next 24 hours</div>';
-      return;
-    }
-
-    calendarEl.innerHTML = calendarEvents.map(event => {
-      const eventTime = new Date(event.DateTime);
-      const timeStr = eventTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      const consensus = event.Consensus || '—';
-      const isUSA = event.Country === 'United States' ? '🇺🇸' : event.Country === 'United Kingdom' ? '🇬🇧' : '🌍';
-
-      return `
-        <div style="padding: 12px; background: rgba(255,255,255,0.3); border-radius: 8px; border-left: 3px solid var(--accent-red);">
-          <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${isUSA} ${event.Event}</div>
-          <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
-            <div>⏰ ${timeStr} — Consensus: <strong>${consensus}</strong></div>
-            ${event.Previous ? `<div>Previous: ${event.Previous}</div>` : ''}
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
@@ -1796,61 +1564,20 @@
   function initializeApp() {
     console.log('Initializing Gold Trading Platform...');
 
-    // Show fallback data immediately
-    state.gold = {
-      label: 'GC=F',
-      symbol: 'GC=F',
-      price: 4000.30,
-      previousClose: 4149.40,
-      change: -149.10,
-      changePct: -3.593,
-      exchangeTime: new Date().toISOString()
-    };
-    state.dxy = {
-      label: 'DXY',
-      symbol: 'DX-Y.NYB',
-      price: 104.35,
-      previousClose: 104.22,
-      change: 0.13,
-      changePct: 0.125,
-      exchangeTime: new Date().toISOString()
-    };
-    state.tips = {value: 2.28, date: new Date().toISOString().split('T')[0]};
-
-    updateTicker();
-    updateLevels();
-    updateBias();
-
-    // Then fetch live data
+    // Initial price update
     updatePrices();
-
-    // Fetch economic calendar
-    fetchEconomicCalendar();
 
     // Initialize chart
     initChart();
 
-    // Set up 5-second DXY tracking interval
-    const dxyTrackInterval = setInterval(() => {
-      trackDxyMovement();
-    }, DXY_HISTORY_INTERVAL);
-
-    // Set up 30-second price update interval
+    // Set up periodic updates
     const updateInterval = setInterval(() => {
       updatePrices();
-      trackDxyMovement();
     }, 30000);
-
-    // Set up 10-minute calendar refresh interval
-    const calendarInterval = setInterval(() => {
-      fetchEconomicCalendar();
-    }, CALENDAR_FETCH_INTERVAL);
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
-      clearInterval(dxyTrackInterval);
       clearInterval(updateInterval);
-      clearInterval(calendarInterval);
     });
 
     console.log('Platform initialized successfully');

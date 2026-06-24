@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f0f0f0; }
+        .box { background: white; padding: 20px; border-radius: 8px; margin: 10px 0; }
+        h2 { color: #333; }
+        code { background: #eee; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Gold Trading Platform - API Test</h1>
+
+    <div class="box">
+        <h2>Market Data</h2>
+        <div id="marketData">Loading...</div>
+    </div>
+
+    <div class="box">
+        <h2>Economic Calendar</h2>
+        <div id="calendarData">Loading...</div>
+    </div>
+
+    <script>
+        const apiUrl = 'http://127.0.0.1:8787/api/markets';
+        const calendarUrl = 'http://127.0.0.1:8787/api/calendar';
+
+        // Fetch market data
+        fetch(apiUrl)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('marketData').innerHTML = `
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    <p><strong>Gold: $${data.gold?.price}</strong></p>
+                    <p><strong>DXY: ${data.dxy?.price}</strong></p>
+                `;
+            })
+            .catch(e => {
+                document.getElementById('marketData').innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
+            });
+
+        // Fetch calendar data
+        fetch(calendarUrl)
+            .then(r => r.json())
+            .then(data => {
+                const events = data.events?.slice(0, 5).map(e =>
+                    `<div>${e.Event} - ${e.Consensus}</div>`
+                ).join('');
+                document.getElementById('calendarData').innerHTML = `
+                    <p>Events (first 5):</p>
+                    ${events}
+                `;
+            })
+            .catch(e => {
+                document.getElementById('calendarData').innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
+            });
+    </script>
+</body>
+</html>
