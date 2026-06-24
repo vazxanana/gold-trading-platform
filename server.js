@@ -256,6 +256,29 @@ function getHighImpactCalendarEvents() {
   return sortedEvents.slice(0, 8);
 }
 
+// Load HTML file at startup
+let htmlContent = null;
+const possiblePaths = [
+  path.join(__dirname, 'gold-trading.html'),
+  path.join(process.cwd(), 'gold-trading.html'),
+  './gold-trading.html',
+  '/app/gold-trading.html'
+];
+
+for (const p of possiblePaths) {
+  try {
+    if (fs.existsSync(p)) {
+      htmlContent = fs.readFileSync(p, 'utf8');
+      console.log(`Loaded HTML from: ${p}`);
+      break;
+    }
+  } catch (e) {}
+}
+
+if (!htmlContent) {
+  console.warn('WARNING: HTML file not found. Will only serve API endpoints.');
+}
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -298,37 +321,12 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/' || req.url === '/gold-trading.html') {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-    // Try multiple paths to find the HTML file
-    const possiblePaths = [
-      path.join(__dirname, 'gold-trading.html'),
-      path.join(process.cwd(), 'gold-trading.html'),
-      './gold-trading.html',
-      '/app/gold-trading.html'
-    ];
-
-    let htmlPath = null;
-    for (const p of possiblePaths) {
-      try {
-        if (fs.existsSync(p)) {
-          htmlPath = p;
-          break;
-        }
-      } catch (e) {}
-    }
-
-    if (htmlPath) {
-      fs.readFile(htmlPath, 'utf8', (err, data) => {
-        if (err) {
-          res.writeHead(500);
-          res.end('Error reading HTML file');
-          return;
-        }
-        res.writeHead(200);
-        res.end(data);
-      });
+    if (htmlContent) {
+      res.writeHead(200);
+      res.end(htmlContent);
     } else {
       res.writeHead(404);
-      res.end('HTML file not found at any path');
+      res.end('HTML file not available');
     }
     return;
   }
