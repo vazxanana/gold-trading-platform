@@ -2,10 +2,10 @@
   "name": "gold-trading-platform",
   "version": "1.0.0",
   "description": "Institutional-grade gold trading dashboard with live market data",
-  "main": "gold-market-proxy.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node gold-market-proxy.js",
-    "dev": "node gold-market-proxy.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "keywords": [
     "gold",

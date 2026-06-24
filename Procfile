@@ -1,1 +1,1 @@
-web: node gold-market-proxy.js
+web: node server.js
