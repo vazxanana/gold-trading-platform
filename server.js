@@ -168,6 +168,40 @@ async function fetchFxFallback() {
   };
 }
 
+// All majors for the country-aware pip tracker.
+// invert=true means pair = 1/(USD->ccy) e.g. EURUSD; false means pair = USD->ccy e.g. USDJPY.
+const PAIRS = {
+  EURUSD: { ccy: 'EUR', invert: true,  factor: 10000 },
+  GBPUSD: { ccy: 'GBP', invert: true,  factor: 10000 },
+  AUDUSD: { ccy: 'AUD', invert: true,  factor: 10000 },
+  NZDUSD: { ccy: 'NZD', invert: true,  factor: 10000 },
+  USDJPY: { ccy: 'JPY', invert: false, factor: 100 },
+  USDCAD: { ccy: 'CAD', invert: false, factor: 10000 },
+  USDCHF: { ccy: 'CHF', invert: false, factor: 10000 }
+};
+
+// Fetch a single pair fast: Yahoo intraday (localhost) → frankfurter daily (cloud).
+async function fetchSinglePair(pair) {
+  const cfg = PAIRS[pair];
+  if (!cfg) throw new Error('unknown pair ' + pair);
+  try {
+    const p = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${pair}=X?range=1d&interval=1m`);
+    const parsed = parseYahooChart(p, pair);
+    return { ...parsed, pair, factor: cfg.factor, source: 'yahoo' };
+  } catch (e) {
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
+    const j = await getJson(`https://api.frankfurter.dev/v1/${start}..${end}?base=USD&symbols=${cfg.ccy}`);
+    const dates = Object.keys(j.rates || {}).sort();
+    if (!dates.length) throw new Error('frankfurter empty for ' + pair);
+    const lastR = j.rates[dates[dates.length - 1]][cfg.ccy];
+    const prevR = (j.rates[dates[dates.length - 2]] || j.rates[dates[dates.length - 1]])[cfg.ccy];
+    const price = cfg.invert ? 1 / lastR : lastR;
+    const prevClose = cfg.invert ? 1 / prevR : prevR;
+    return { ...fxEntry(price, prevClose), label: pair, symbol: pair, pair, factor: cfg.factor, source: 'frankfurter' };
+  }
+}
+
 async function marketSnapshot() {
   const errors = [];
   const [gold, dxy, vix, tips, eur, gbp, jpy] = await Promise.allSettled([
@@ -364,6 +398,38 @@ function getHighImpactCalendarEvents() {
       Importance: '3',
       Consensus: '5.25%',
       Previous: '5.25%'
+    },
+    {
+      Country: 'Canada',
+      Event: 'Canada Employment Change',
+      DateTime: new Date(now.getTime() + 18 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '+22.5K',
+      Previous: '+90.4K'
+    },
+    {
+      Country: 'Canada',
+      Event: 'BoC Interest Rate Decision',
+      DateTime: new Date(now.getTime() + 60 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '4.75%',
+      Previous: '5.00%'
+    },
+    {
+      Country: 'Japan',
+      Event: 'BoJ Policy Rate',
+      DateTime: new Date(now.getTime() + 84 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '0.10%',
+      Previous: '0.10%'
+    },
+    {
+      Country: 'Australia',
+      Event: 'RBA Interest Rate Decision',
+      DateTime: new Date(now.getTime() + 108 * 3600000).toISOString(),
+      Importance: '3',
+      Consensus: '4.35%',
+      Previous: '4.35%'
     }
   ];
 
@@ -425,6 +491,21 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(500, { 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ok: false, fetchedAt: new Date().toISOString(), errors: [error.message] }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/fx') {
+    res.setHeader('Content-Type', 'application/json');
+    const params = new URLSearchParams((req.url.split('?')[1]) || '');
+    const pair = (params.get('pair') || 'EURUSD').toUpperCase();
+    try {
+      const d = await fetchSinglePair(pair);
+      res.writeHead(200, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true, ...d }));
+    } catch (error) {
+      res.writeHead(502, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, pair, error: error.message }));
     }
     return;
   }

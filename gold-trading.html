@@ -903,48 +903,82 @@
       letter-spacing: 0.4px;
     }
 
-    /* Momentum / pip card */
+    /* Momentum / news-reaction card */
     .momentum {
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      background: linear-gradient(160deg, rgba(26,29,41,0.97) 0%, rgba(40,44,60,0.97) 100%);
+      background: linear-gradient(155deg, #1A1D29 0%, #23283a 55%, #2b3147 100%);
       color: #fff;
-      border-radius: 14px;
-      padding: 24px 26px;
+      border-radius: 16px;
+      padding: 22px 24px;
       min-height: 100%;
+      box-shadow: 0 18px 50px rgba(26,29,41,0.28);
+      position: relative;
+      overflow: hidden;
     }
+    .momentum::before {
+      content: '';
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 180px; height: 180px;
+      background: radial-gradient(circle, rgba(184,134,11,0.22), transparent 70%);
+      pointer-events: none;
+    }
+    .mom-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .mom-tag {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: rgba(255,255,255,0.55);
-      font-weight: 600;
+      font-size: 9.5px; text-transform: uppercase; letter-spacing: 1.1px;
+      color: rgba(255,255,255,0.5); font-weight: 700;
     }
     .mom-pair {
-      font-size: 30px;
-      font-weight: 800;
-      font-family: 'JetBrains Mono', monospace;
-      letter-spacing: -0.5px;
-      margin: 4px 0 2px;
+      font-size: 30px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px; margin: 5px 0 3px; line-height: 1;
     }
-    .mom-px { font-size: 13px; color: rgba(255,255,255,0.7); font-family: 'JetBrains Mono', monospace; }
-    .mom-divider { height: 1px; background: rgba(255,255,255,0.12); margin: 18px 0; }
-    .mom-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-    .mom-row .lbl { font-size: 10.5px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; }
-    .mom-pips { font-size: 26px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
-    .mom-pips.small { font-size: 18px; }
+    .mom-px { font-size: 12px; color: rgba(255,255,255,0.6); font-family: 'JetBrains Mono', monospace; }
+    .mom-ccy {
+      flex-shrink: 0;
+      font-size: 13px; font-weight: 800; letter-spacing: 0.5px;
+      padding: 7px 13px; border-radius: 9px;
+      background: rgba(227,160,8,0.16);
+      color: #ffd877;
+      border: 1px solid rgba(227,160,8,0.35);
+    }
+
+    .mom-stats {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      margin: 20px 0 4px;
+    }
+    .mom-stat {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .mom-stat-lbl {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: rgba(255,255,255,0.45); font-weight: 700; margin-bottom: 6px;
+    }
+    .mom-pips { font-size: 27px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1; color: rgba(255,255,255,0.85); }
     .pips-up { color: #4ade80; }
     .pips-down { color: #f87171; }
-    .mom-driver {
-      margin-top: 16px;
-      font-size: 11px;
-      line-height: 1.5;
-      color: rgba(255,255,255,0.62);
-      border-top: 1px solid rgba(255,255,255,0.12);
-      padding-top: 14px;
+    .pips-flat { color: rgba(255,255,255,0.55); }
+
+    .mom-event {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      margin-top: 18px; padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.1);
     }
-    .mom-driver strong { color: #fff; }
+    .mom-event-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,0.4); font-weight: 700; }
+    .mom-event-name { font-size: 13px; font-weight: 600; color: #fff; margin-top: 3px; }
+    .mom-countdown {
+      flex-shrink: 0; text-align: right;
+      font-size: 18px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+      color: #ffd877;
+    }
+    .mom-foot {
+      margin-top: 14px; font-size: 10.5px; line-height: 1.5;
+      color: rgba(255,255,255,0.5);
+    }
+    .mom-foot strong { color: rgba(255,255,255,0.85); }
   </style>
 </head>
 <body>
@@ -1314,19 +1348,35 @@
       </div>
 
       <div class="momentum" id="momentumCard">
-        <div class="mom-tag">Next red-folder currency</div>
-        <div class="mom-pair" id="momPair">—</div>
-        <div class="mom-px" id="momPx">Waiting for feed…</div>
-        <div class="mom-divider"></div>
-        <div class="mom-row">
-          <span class="lbl">Today</span>
-          <span class="mom-pips" id="momDayPips">—</span>
+        <div class="mom-head">
+          <div>
+            <div class="mom-tag">News reaction tracker</div>
+            <div class="mom-pair" id="momPair">—</div>
+            <div class="mom-px" id="momPx">Waiting for feed…</div>
+          </div>
+          <div class="mom-ccy" id="momCcy">—</div>
         </div>
-        <div class="mom-row">
-          <span class="lbl">Last 5 min</span>
-          <span class="mom-pips small" id="mom5mPips">—</span>
+
+        <div class="mom-stats">
+          <div class="mom-stat">
+            <div class="mom-stat-lbl">1 min</div>
+            <div class="mom-pips" id="mom1mPips">—</div>
+          </div>
+          <div class="mom-stat">
+            <div class="mom-stat-lbl">5 min</div>
+            <div class="mom-pips" id="mom5mPips">—</div>
+          </div>
         </div>
-        <div class="mom-driver" id="momDriver">Tracks the pip move of the pair tied to the next high-impact release.</div>
+
+        <div class="mom-event">
+          <div>
+            <div class="mom-event-lbl">Next high-impact release</div>
+            <div class="mom-event-name" id="momEventName">—</div>
+          </div>
+          <div class="mom-countdown" id="momCountdown">—</div>
+        </div>
+
+        <div class="mom-foot" id="momDriver">Pick a pair tied to the next red-folder country and watch the pip reaction.</div>
       </div>
     </div>
   </div>
@@ -1709,7 +1759,6 @@
       updateLevels();
       updateBias();
       updateFeedStatus();
-      trackPair();
       if (state.errors.length) console.warn('Market feed warnings:', state.errors);
       return;
     } catch (error) {
@@ -1736,35 +1785,42 @@
     updateLevels();
     updateBias();
     updateFeedStatus();
-    trackPair();
 
     if (state.errors.length) console.warn('Market feed warnings:', state.errors);
   }
 
-  // ===== Economic calendar + country-aware pip tracker =====
+  // ===== Economic calendar + country-aware news-reaction pip tracker =====
   let calendarData = [];
-  let activePair = null;     // e.g. 'GBPUSD'
+  let activePair = null;     // e.g. 'USDCAD'
   let activeEvent = null;    // next high-impact event
-  let pairSamples = [];      // {price, time} for 5-min tracking of the active pair
+  let activeFactor = 10000;  // pip factor for active pair
+  let pairSamples = [];      // {price, time} samples of the active pair
 
   const COUNTRY_PAIR = {
     'United States': 'EURUSD', 'United Kingdom': 'GBPUSD',
-    'Eurozone': 'EURUSD', 'Euro Area': 'EURUSD', 'Japan': 'USDJPY'
+    'Eurozone': 'EURUSD', 'Euro Area': 'EURUSD', 'European Union': 'EURUSD',
+    'Japan': 'USDJPY', 'Canada': 'USDCAD', 'Australia': 'AUDUSD',
+    'New Zealand': 'NZDUSD', 'Switzerland': 'USDCHF'
+  };
+  const COUNTRY_CCY = {
+    'United States': 'USD', 'United Kingdom': 'GBP', 'Eurozone': 'EUR', 'Euro Area': 'EUR',
+    'European Union': 'EUR', 'Japan': 'JPY', 'Canada': 'CAD', 'Australia': 'AUD',
+    'New Zealand': 'NZD', 'Switzerland': 'CHF'
   };
   const COUNTRY_FLAG = {
-    'United States': '🇺🇸', 'United Kingdom': '🇬🇧',
-    'Eurozone': '🇪🇺', 'Euro Area': '🇪🇺', 'Japan': '🇯🇵'
+    'United States': '🇺🇸', 'United Kingdom': '🇬🇧', 'Eurozone': '🇪🇺', 'Euro Area': '🇪🇺',
+    'European Union': '🇪🇺', 'Japan': '🇯🇵', 'Canada': '🇨🇦', 'Australia': '🇦🇺',
+    'New Zealand': '🇳🇿', 'Switzerland': '🇨🇭'
   };
-  const pipFactor = (pair) => (pair === 'USDJPY' ? 100 : 10000);
   const pairLabel = (pair) => pair ? `${pair.slice(0,3)}/${pair.slice(3)}` : '—';
   const calNum = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : null; };
+  const apiBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? `http://${location.hostname}:8787`
+    : 'https://gold-trading-platform-production.up.railway.app';
 
   async function loadCalendar() {
     try {
-      const url = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-        ? `http://${location.hostname}:8787/api/calendar`
-        : 'https://gold-trading-platform-production.up.railway.app/api/calendar';
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(`${apiBase}/api/calendar`, { cache: 'no-store' });
       const data = await res.json();
       calendarData = data.events || [];
     } catch (e) {
@@ -1784,8 +1840,13 @@
 
     const now = Date.now();
     const sorted = [...calendarData].sort((a, b) => new Date(a.DateTime) - new Date(b.DateTime));
-    activeEvent = sorted.find(e => new Date(e.DateTime).getTime() > now) || sorted[sorted.length - 1];
-    activePair = COUNTRY_PAIR[activeEvent && activeEvent.Country] || 'EURUSD';
+    const nextEvent = sorted.find(e => new Date(e.DateTime).getTime() > now) || sorted[sorted.length - 1];
+
+    // Switch tracked pair when the next event changes; reset the sample window.
+    const newPair = COUNTRY_PAIR[nextEvent && nextEvent.Country] || 'EURUSD';
+    if (newPair !== activePair) { pairSamples = []; }
+    activeEvent = nextEvent;
+    activePair = newPair;
 
     body.innerHTML = sorted.map(e => {
       const d = new Date(e.DateTime);
@@ -1821,50 +1882,94 @@
 
   function updateMomentumLabels() {
     const pairEl = document.getElementById('momPair');
+    const ccyEl = document.getElementById('momCcy');
+    const evEl = document.getElementById('momEventName');
     const driverEl = document.getElementById('momDriver');
+    const ccy = COUNTRY_CCY[activeEvent && activeEvent.Country] || 'USD';
     if (pairEl) pairEl.textContent = pairLabel(activePair);
-    if (driverEl && activeEvent) {
+    if (ccyEl) ccyEl.textContent = ccy;
+    if (evEl && activeEvent) {
       const flag = COUNTRY_FLAG[activeEvent.Country] || '🌍';
-      driverEl.innerHTML = `Next high-impact: <strong>${flag} ${activeEvent.Event}</strong> (${activeEvent.Country}). Watching <strong>${pairLabel(activePair)}</strong> for the reaction.`;
+      evEl.textContent = `${flag} ${activeEvent.Event}`;
+    }
+    if (driverEl && activeEvent) {
+      driverEl.innerHTML = `When <strong>${activeEvent.Event}</strong> prints, the <strong>${ccy}</strong> reaction shows here as pips on <strong>${pairLabel(activePair)}</strong>.`;
     }
   }
 
-  function trackPair() {
-    if (!activePair || !state.fx || !state.fx[activePair]) return;
-    pairSamples.push({ price: state.fx[activePair].price, time: Date.now() });
-    if (pairSamples.length > 80) pairSamples.shift();
-    renderMomentum();
+  function updateCountdown() {
+    const el = document.getElementById('momCountdown');
+    if (!el || !activeEvent) return;
+    const diff = new Date(activeEvent.DateTime).getTime() - Date.now();
+    if (diff <= 0) { el.textContent = 'LIVE'; el.style.color = '#4ade80'; return; }
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    el.style.color = '';
+    el.textContent = h > 24 ? `${Math.floor(h/24)}d ${h%24}h` : `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   }
 
-  function renderMomentum() {
-    if (!activePair || !state.fx || !state.fx[activePair]) return;
-    const fx = state.fx[activePair];
-    const factor = pipFactor(activePair);
-    const decimals = activePair === 'USDJPY' ? 3 : 5;
+  let activeSource = null;   // 'yahoo' (intraday) | 'frankfurter' (daily)
 
-    const pxEl = document.getElementById('momPx');
-    const dayEl = document.getElementById('momDayPips');
-    const fiveEl = document.getElementById('mom5mPips');
+  // Fast poll of just the active pair for true 1-min / 5-min resolution.
+  async function pollActivePair() {
+    if (!activePair) return;
+    try {
+      const res = await fetch(`${apiBase}/api/fx?pair=${activePair}`, { cache: 'no-store' });
+      const d = await res.json();
+      if (!d.ok) return;
+      activeFactor = d.factor || 10000;
+      activeSource = d.source || null;
+      pairSamples.push({ price: d.price, prev: d.previousClose, time: Date.now() });
+      if (pairSamples.length > 120) pairSamples.shift();
+      renderMomentum(d);
+    } catch (e) { /* keep last */ }
+  }
 
-    if (pxEl) pxEl.textContent = `${fx.price.toFixed(decimals)}  ·  prev ${Number(fx.previousClose).toFixed(decimals)}`;
-
-    const dayPips = (fx.change || 0) * factor;
-    if (dayEl) {
-      dayEl.textContent = `${dayPips >= 0 ? '+' : ''}${dayPips.toFixed(1)} pips`;
-      dayEl.className = `mom-pips ${dayPips >= 0 ? 'pips-up' : 'pips-down'}`;
-    }
-
+  function windowPips(samples, ms) {
     const now = Date.now();
-    const recent = pairSamples.filter(s => s.time >= now - 300000);
-    if (recent.length >= 2) {
-      const p5 = (recent[recent.length - 1].price - recent[0].price) * factor;
-      if (fiveEl) {
-        fiveEl.textContent = `${p5 >= 0 ? '+' : ''}${p5.toFixed(1)} pips`;
-        fiveEl.className = `mom-pips small ${p5 >= 0 ? 'pips-up' : 'pips-down'}`;
+    const win = samples.filter(s => s.time >= now - ms);
+    if (win.length < 2) return null;
+    return (win[win.length - 1].price - win[0].price) * activeFactor;
+  }
+
+  function setPips(id, pips) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (pips === null) { el.textContent = 'collecting…'; el.className = 'mom-pips pips-flat'; return; }
+    const cls = Math.abs(pips) < 0.05 ? 'pips-flat' : (pips > 0 ? 'pips-up' : 'pips-down');
+    el.textContent = `${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips`;
+    el.className = `mom-pips ${cls}`;
+  }
+
+  function renderMomentum(latest) {
+    const fx = latest || (pairSamples.length ? { price: pairSamples[pairSamples.length-1].price, previousClose: pairSamples[pairSamples.length-1].prev } : null);
+    if (!fx) return;
+    const decimals = activePair === 'USDJPY' ? 3 : 5;
+    const dayPips = (Number(fx.price) - Number(fx.previousClose)) * activeFactor;
+    const daySign = dayPips >= 0 ? '+' : '';
+    const pxEl = document.getElementById('momPx');
+    if (pxEl) pxEl.textContent = `${Number(fx.price).toFixed(decimals)}  ·  today ${daySign}${dayPips.toFixed(1)} pips`;
+
+    if (activeSource === 'frankfurter') {
+      // Cloud daily feed: no intraday ticks — show the daily move instead of a fake 0.0
+      const m1 = document.getElementById('mom1mPips');
+      const m5 = document.getElementById('mom5mPips');
+      if (m1) { m1.textContent = 'desktop only'; m1.className = 'mom-pips pips-flat'; m1.style.fontSize = '15px'; }
+      if (m5) {
+        m5.textContent = `${daySign}${dayPips.toFixed(1)}`;
+        m5.className = `mom-pips ${Math.abs(dayPips) < 0.05 ? 'pips-flat' : (dayPips > 0 ? 'pips-up' : 'pips-down')}`;
+        m5.style.fontSize = '';
+        const lbl = m5.parentElement && m5.parentElement.querySelector('.mom-stat-lbl');
+        if (lbl) lbl.textContent = 'Today';
       }
-    } else if (fiveEl) {
-      fiveEl.textContent = 'collecting…';
-      fiveEl.className = 'mom-pips small';
+    } else {
+      const m1 = document.getElementById('mom1mPips');
+      if (m1) m1.style.fontSize = '';
+      const m5lbl = document.querySelectorAll('.mom-stat-lbl')[1];
+      if (m5lbl) m5lbl.textContent = '5 min';
+      setPips('mom1mPips', windowPips(pairSamples, 60000));
+      setPips('mom5mPips', windowPips(pairSamples, 300000));
     }
   }
 
@@ -1885,8 +1990,12 @@
     // Initialize chart
     initChart();
 
-    // Sample the active pair every 5s for the 5-minute pip move
-    const pairInterval = setInterval(trackPair, 5000);
+    // Poll the active pair every 8s for true 1-min / 5-min pip resolution
+    const pairInterval = setInterval(pollActivePair, 8000);
+    setTimeout(pollActivePair, 1500);
+
+    // Live countdown to the next high-impact release
+    const countdownInterval = setInterval(updateCountdown, 1000);
 
     // Refresh market data every 30 seconds
     const updateInterval = setInterval(() => {
@@ -1900,6 +2009,7 @@
     window.addEventListener('beforeunload', () => {
       clearInterval(updateInterval);
       clearInterval(pairInterval);
+      clearInterval(countdownInterval);
       clearInterval(calendarInterval);
     });
 
