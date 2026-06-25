@@ -979,6 +979,51 @@
       color: rgba(255,255,255,0.5);
     }
     .mom-foot strong { color: rgba(255,255,255,0.85); }
+
+    /* ===== Conviction gauge ===== */
+    .gauge {
+      margin-top: 12px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(194,59,51,0.25) 0%, rgba(227,160,8,0.25) 50%, rgba(0,166,81,0.25) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .gauge-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 0%;
+      border-radius: 999px;
+      transition: width 0.6s cubic-bezier(0.4,0,0.2,1), background 0.4s ease;
+    }
+    .gauge-fill.zone-bear { background: linear-gradient(90deg, #C23B33, #e0584f); }
+    .gauge-fill.zone-neutral { background: linear-gradient(90deg, #E3A008, #f0b62e); }
+    .gauge-fill.zone-bull { background: linear-gradient(90deg, #00A651, #2bc46f); }
+    .gauge-scale {
+      display: flex; justify-content: space-between;
+      margin-top: 5px;
+      font-size: 8.5px; letter-spacing: 0.5px; text-transform: uppercase;
+      color: var(--text-tertiary); font-weight: 600;
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 1024px) {
+      .header { padding: 16px 20px; }
+      .header-inner { flex-direction: column; align-items: flex-start; gap: 16px; }
+      .price-ticker { width: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+      .ticker-item { min-width: 110px; flex: 1 1 auto; }
+      .container { padding: 22px 20px; }
+      .market-brief { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 680px) {
+      .market-brief { grid-template-columns: 1fr; }
+      .ticker-value { font-size: 18px; }
+      .grid-3, .grid-2 { grid-template-columns: 1fr !important; }
+      .mom-stats { grid-template-columns: 1fr 1fr; }
+      .cal-table thead th:nth-child(3),
+      .cal-table tbody td:nth-child(3) { display: none; }
+      .brief-title { font-size: 20px; }
+    }
   </style>
 </head>
 <body>
@@ -1025,12 +1070,14 @@
       <div class="brief-kicker">Current Playbook</div>
       <div class="brief-title" id="playbookTitle">Waiting for live market data</div>
       <div class="brief-copy" id="playbookCopy">Signals will update from live gold, DXY, and latest FRED TIPS data. No stale setup is shown as current.</div>
-      <div class="source-note" id="sourceNote">Sources: Yahoo Finance chart API for GC=F and DX-Y.NYB; FRED DFII10 for 10Y TIPS.</div>
+      <div class="source-note" id="sourceNote">Sources: spot XAUUSD, DXY, ^VIX, and FRED DFII10 (10Y real yield).</div>
     </div>
     <div class="brief-card glass">
       <div class="brief-kicker">Live Bias Score</div>
       <div class="brief-number" id="biasScore">—</div>
       <div class="brief-copy" id="biasDetail">Waiting for feeds</div>
+      <div class="gauge"><div class="gauge-fill" id="biasGauge"></div></div>
+      <div class="gauge-scale"><span>Bearish</span><span>Neutral</span><span>Bullish</span></div>
     </div>
     <div class="brief-card glass">
       <div class="brief-kicker">Primary Entry</div>
@@ -1653,8 +1700,8 @@
     setText('resistance1', fmt(levels.resistance1, 0));
     setText('resistance2', fmt(levels.resistance2, 0));
     setText('resistance3', fmt(levels.resistance3, 0));
-    setText('entryDescription', `Live GC=F reference ${fmt(p)}; pullback zone approx ${fmt(levels.entry, 0)}`);
-    setText('stopDescription', `Model risk ${fmt(p - levels.stop)} points from current futures price`);
+    setText('entryDescription', `Live spot XAUUSD ${fmt(p)}; pullback zone approx ${fmt(levels.entry, 0)}`);
+    setText('stopDescription', `Model risk ${fmt(p - levels.stop)} points from current spot price`);
 
     setText('scenario1Title', `Scenario 1: Re-Entry at R1 (${fmt(levels.resistance1, 0)})`);
     setText('scenario1Action', `Pullback to ${fmt(levels.resistance1 - 5, 0)}-${fmt(levels.resistance1, 0)} creates alt entry`);
@@ -1740,6 +1787,12 @@
     setText('liveDrivers', driverPhrases.join(' • '));
     setText('compositeScore', scoreText);
     setText('compositeDetail', present.length ? `${bias.toUpperCase()} · avg of ${present.length} macro drivers` : 'Waiting for feeds');
+
+    const gauge = $('biasGauge');
+    if (gauge) {
+      gauge.style.width = present.length ? `${composite}%` : '0%';
+      gauge.className = 'gauge-fill ' + (composite >= 65 ? 'zone-bull' : composite >= 45 ? 'zone-neutral' : 'zone-bear');
+    }
 
     $('biasScore')?.classList.toggle('text-green', composite >= 65);
     $('biasScore')?.classList.toggle('text-red', composite < 45 && present.length > 0);
