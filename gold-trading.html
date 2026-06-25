@@ -1006,6 +1006,32 @@
       color: var(--text-tertiary); font-weight: 600;
     }
 
+    /* ===== Bias sparkline ===== */
+    .spark-wrap { margin-top: 12px; }
+    .spark-label {
+      font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--text-tertiary); font-weight: 600; margin-bottom: 3px;
+    }
+
+    /* ===== Alert toast ===== */
+    .alert-bar {
+      position: fixed;
+      top: -60px; left: 50%; transform: translateX(-50%);
+      z-index: 2000;
+      padding: 11px 22px;
+      border-radius: 0 0 12px 12px;
+      font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
+      color: #fff; white-space: nowrap;
+      box-shadow: 0 10px 30px rgba(26,29,41,0.25);
+      opacity: 0; transition: top 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.45s ease;
+      background: #1A1D29;
+    }
+    .alert-bar.show { top: 0; opacity: 1; }
+    .alert-bar.alert-bull { background: linear-gradient(90deg, #00A651, #2bc46f); }
+    .alert-bar.alert-bear { background: linear-gradient(90deg, #C23B33, #e0584f); }
+    .alert-bar.alert-neutral { background: linear-gradient(90deg, #E3A008, #f0b62e); color: #1A1D29; }
+    .alert-bar.alert-event { background: linear-gradient(90deg, #0052CC, #2b7de0); }
+
     /* ===== Responsive ===== */
     @media (max-width: 1024px) {
       .header { padding: 16px 20px; }
@@ -1027,6 +1053,8 @@
   </style>
 </head>
 <body>
+
+<div class="alert-bar" id="alertBar"></div>
 
 <!-- HEADER -->
 <div class="header">
@@ -1078,6 +1106,7 @@
       <div class="brief-copy" id="biasDetail">Waiting for feeds</div>
       <div class="gauge"><div class="gauge-fill" id="biasGauge"></div></div>
       <div class="gauge-scale"><span>Bearish</span><span>Neutral</span><span>Bullish</span></div>
+      <div class="spark-wrap"><div class="spark-label">Session trend</div><div id="biasSpark"></div></div>
     </div>
     <div class="brief-card glass">
       <div class="brief-kicker">Primary Entry</div>
@@ -1475,6 +1504,7 @@
     tips: null,
     vix: null,
     fx: null,
+    levels: null,
     errors: []
   };
 
@@ -1673,19 +1703,34 @@
     if (!state.gold) return;
 
     const p = state.gold.price;
-    const levels = {
-      entry: roundLevel(p * 0.997),
-      stop: roundLevel(p * 0.992),
-      target1: roundLevel(p * 1.004),
-      target2: roundLevel(p * 1.011),
-      target3: roundLevel(p * 1.018),
-      support1: roundLevel(p * 0.996),
-      support2: roundLevel(p * 0.989),
-      support3: roundLevel(p * 0.982),
-      resistance1: roundLevel(p * 1.004),
-      resistance2: roundLevel(p * 1.011),
-      resistance3: roundLevel(p * 1.018)
-    };
+    const L = state.levels;   // real pivots + ATR from /api/levels
+    const rnd = (v) => Math.round(v);
+    let levels, entryDesc, stopDesc;
+
+    if (L && Number.isFinite(L.pivot)) {
+      // Real floor-trader pivots (from prior session H/L/C) + ATR(14)-based stop
+      const entry = rnd(L.pivot);
+      const stop = rnd(L.s1 - 0.25 * L.atr);
+      levels = {
+        entry, stop,
+        target1: rnd(L.r1), target2: rnd(L.r2), target3: rnd(L.r3),
+        support1: rnd(L.s1), support2: rnd(L.s2), support3: rnd(L.s3),
+        resistance1: rnd(L.r1), resistance2: rnd(L.r2), resistance3: rnd(L.r3)
+      };
+      const riskPts = entry - stop;
+      entryDesc = `Daily pivot ${fmt(entry,0)} · ATR(14) ${fmt(L.atr,0)} pts (${L.session} session)`;
+      stopDesc = `Below S1 — ${fmt(riskPts,0)} pts risk (~${(riskPts / L.atr).toFixed(1)}× ATR)`;
+    } else {
+      // Fallback: percentage model around current price
+      levels = {
+        entry: roundLevel(p * 0.997), stop: roundLevel(p * 0.992),
+        target1: roundLevel(p * 1.004), target2: roundLevel(p * 1.011), target3: roundLevel(p * 1.018),
+        support1: roundLevel(p * 0.996), support2: roundLevel(p * 0.989), support3: roundLevel(p * 0.982),
+        resistance1: roundLevel(p * 1.004), resistance2: roundLevel(p * 1.011), resistance3: roundLevel(p * 1.018)
+      };
+      entryDesc = `Live spot XAUUSD ${fmt(p)}; pullback zone approx ${fmt(levels.entry, 0)}`;
+      stopDesc = `Model risk ${fmt(p - levels.stop)} points from current spot price`;
+    }
 
     setText('briefEntry', fmt(levels.entry, 0));
     setText('briefInvalidation', fmt(levels.stop, 0));
@@ -1700,8 +1745,8 @@
     setText('resistance1', fmt(levels.resistance1, 0));
     setText('resistance2', fmt(levels.resistance2, 0));
     setText('resistance3', fmt(levels.resistance3, 0));
-    setText('entryDescription', `Live spot XAUUSD ${fmt(p)}; pullback zone approx ${fmt(levels.entry, 0)}`);
-    setText('stopDescription', `Model risk ${fmt(p - levels.stop)} points from current spot price`);
+    setText('entryDescription', entryDesc);
+    setText('stopDescription', stopDesc);
 
     setText('scenario1Title', `Scenario 1: Re-Entry at R1 (${fmt(levels.resistance1, 0)})`);
     setText('scenario1Action', `Pullback to ${fmt(levels.resistance1 - 5, 0)}-${fmt(levels.resistance1, 0)} creates alt entry`);
@@ -1788,11 +1833,13 @@
     setText('compositeScore', scoreText);
     setText('compositeDetail', present.length ? `${bias.toUpperCase()} · avg of ${present.length} macro drivers` : 'Waiting for feeds');
 
+    const zone = composite >= 65 ? 'bull' : composite >= 45 ? 'neutral' : 'bear';
     const gauge = $('biasGauge');
     if (gauge) {
       gauge.style.width = present.length ? `${composite}%` : '0%';
-      gauge.className = 'gauge-fill ' + (composite >= 65 ? 'zone-bull' : composite >= 45 ? 'zone-neutral' : 'zone-bear');
+      gauge.className = 'gauge-fill zone-' + zone;
     }
+    if (present.length) { pushBiasHistory(composite); checkBiasZoneAlert(composite, zone); }
 
     $('biasScore')?.classList.toggle('text-green', composite >= 65);
     $('biasScore')?.classList.toggle('text-red', composite < 45 && present.length > 0);
@@ -1883,6 +1930,12 @@
     'European Union': '🇪🇺', 'Japan': '🇯🇵', 'Canada': '🇨🇦', 'Australia': '🇦🇺',
     'New Zealand': '🇳🇿', 'Switzerland': '🇨🇭'
   };
+  // Forex Factory events carry an ISO currency code; map those directly.
+  const CCY_PAIR = { USD: 'EURUSD', EUR: 'EURUSD', GBP: 'GBPUSD', JPY: 'USDJPY', CAD: 'USDCAD', AUD: 'AUDUSD', NZD: 'NZDUSD', CHF: 'USDCHF', CNY: 'AUDUSD' };
+  const CCY_FLAG = { USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', CAD: '🇨🇦', AUD: '🇦🇺', NZD: '🇳🇿', CHF: '🇨🇭', CNY: '🇨🇳' };
+  const evCcy = (e) => e && (e.Currency || COUNTRY_CCY[e.Country]) || 'USD';
+  const evPair = (e) => CCY_PAIR[evCcy(e)] || COUNTRY_PAIR[e && e.Country] || 'EURUSD';
+  const evFlag = (e) => CCY_FLAG[evCcy(e)] || COUNTRY_FLAG[e && e.Country] || '🌍';
   const pairLabel = (pair) => pair ? `${pair.slice(0,3)}/${pair.slice(3)}` : '—';
   const calNum = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : null; };
   const apiBase = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -1914,17 +1967,18 @@
     const nextEvent = sorted.find(e => new Date(e.DateTime).getTime() > now) || sorted[sorted.length - 1];
 
     // Switch tracked pair when the next event changes; reset the sample window.
-    const newPair = COUNTRY_PAIR[nextEvent && nextEvent.Country] || 'EURUSD';
+    const newPair = evPair(nextEvent);
     if (newPair !== activePair) { pairSamples = []; }
     activeEvent = nextEvent;
     activePair = newPair;
+    checkEventAlert(nextEvent);
 
     body.innerHTML = sorted.map(e => {
       const d = new Date(e.DateTime);
       const upcoming = d.getTime() > now;
       const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      const flag = COUNTRY_FLAG[e.Country] || '🌍';
+      const flag = evFlag(e);
       const isNext = (e === activeEvent);
 
       let actualCell = '<span class="val-pending">—</span>';
@@ -1956,12 +2010,11 @@
     const ccyEl = document.getElementById('momCcy');
     const evEl = document.getElementById('momEventName');
     const driverEl = document.getElementById('momDriver');
-    const ccy = COUNTRY_CCY[activeEvent && activeEvent.Country] || 'USD';
+    const ccy = evCcy(activeEvent);
     if (pairEl) pairEl.textContent = pairLabel(activePair);
     if (ccyEl) ccyEl.textContent = ccy;
     if (evEl && activeEvent) {
-      const flag = COUNTRY_FLAG[activeEvent.Country] || '🌍';
-      evEl.textContent = `${flag} ${activeEvent.Event}`;
+      evEl.textContent = `${evFlag(activeEvent)} ${activeEvent.Event}`;
     }
     if (driverEl && activeEvent) {
       driverEl.innerHTML = `When <strong>${activeEvent.Event}</strong> prints, the <strong>${ccy}</strong> reaction shows here as pips on <strong>${pairLabel(activePair)}</strong>.`;
@@ -1971,6 +2024,7 @@
   function updateCountdown() {
     const el = document.getElementById('momCountdown');
     if (!el || !activeEvent) return;
+    checkEventAlert(activeEvent);
     const diff = new Date(activeEvent.DateTime).getTime() - Date.now();
     if (diff <= 0) { el.textContent = 'LIVE'; el.style.color = '#4ade80'; return; }
     const h = Math.floor(diff / 3600000);
@@ -2044,6 +2098,81 @@
     }
   }
 
+  // ===== Real technical levels (pivots + ATR) =====
+  async function loadLevels() {
+    try {
+      const res = await fetch(`${apiBase}/api/levels`, { cache: 'no-store' });
+      const d = await res.json();
+      if (d && d.ok) { state.levels = d; updateLevels(); }
+    } catch (e) { console.warn('Levels fetch failed:', e.message); }
+  }
+
+  // ===== Composite bias history sparkline (persisted across refreshes) =====
+  let biasHistory = [];
+  try { biasHistory = JSON.parse(localStorage.getItem('biasHistory') || '[]'); } catch (e) { biasHistory = []; }
+
+  function pushBiasHistory(score) {
+    const last = biasHistory[biasHistory.length - 1];
+    const now = Date.now();
+    if (last && now - last.t < 25000) { last.v = score; }   // throttle to ~30s cadence
+    else { biasHistory.push({ t: now, v: score }); }
+    if (biasHistory.length > 120) biasHistory = biasHistory.slice(-120);
+    try { localStorage.setItem('biasHistory', JSON.stringify(biasHistory)); } catch (e) {}
+    renderSparkline();
+  }
+
+  function renderSparkline() {
+    const el = document.getElementById('biasSpark');
+    if (!el) return;
+    if (biasHistory.length < 2) { el.innerHTML = ''; return; }
+    const vals = biasHistory.map(h => h.v);
+    const W = 220, H = 36, min = 0, max = 100;
+    const pts = vals.map((v, i) => {
+      const x = (i / (vals.length - 1)) * W;
+      const y = H - ((v - min) / (max - min)) * H;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const lastV = vals[vals.length - 1];
+    const col = lastV >= 65 ? 'var(--accent-green)' : lastV >= 45 ? 'var(--accent-amber)' : 'var(--accent-red)';
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;">
+      <line x1="0" y1="${H*0.35}" x2="${W}" y2="${H*0.35}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3"/>
+      <line x1="0" y1="${H*0.55}" x2="${W}" y2="${H*0.55}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3"/>
+      <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  // ===== Alerts =====
+  let lastBiasZone = null;
+  let alertedEventKey = null;
+
+  function showAlert(text, kind) {
+    const bar = document.getElementById('alertBar');
+    if (!bar) return;
+    bar.textContent = text;
+    bar.className = 'alert-bar show ' + (kind || '');
+    clearTimeout(showAlert._t);
+    showAlert._t = setTimeout(() => { bar.className = 'alert-bar'; }, 12000);
+  }
+
+  function checkBiasZoneAlert(composite, zone) {
+    if (lastBiasZone && zone !== lastBiasZone) {
+      if (zone === 'bull') showAlert(`▲ Macro bias flipped BULLISH (${composite}%)`, 'alert-bull');
+      else if (zone === 'bear') showAlert(`▼ Macro bias flipped BEARISH (${composite}%)`, 'alert-bear');
+      else showAlert(`Macro bias now NEUTRAL (${composite}%)`, 'alert-neutral');
+    }
+    lastBiasZone = zone;
+  }
+
+  function checkEventAlert(ev) {
+    if (!ev) return;
+    const mins = (new Date(ev.DateTime).getTime() - Date.now()) / 60000;
+    const key = ev.Event + ev.DateTime;
+    if (mins > 0 && mins <= 15 && alertedEventKey !== key) {
+      alertedEventKey = key;
+      showAlert(`⏱ ${evFlag(ev)} ${ev.Event} in ${Math.ceil(mins)} min — watch ${pairLabel(evPair(ev))}`, 'alert-event');
+    }
+  }
+
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
@@ -2054,12 +2183,17 @@
   function initializeApp() {
     console.log('Initializing Gold Trading Platform...');
 
-    // Initial price update + calendar
+    // Initial price update + calendar + technical levels
     updatePrices();
     loadCalendar();
+    loadLevels();
+    renderSparkline();
 
     // Initialize chart
     initChart();
+
+    // Refresh pivot/ATR levels every 5 minutes
+    const levelsInterval = setInterval(loadLevels, 300000);
 
     // Poll the active pair every 8s for true 1-min / 5-min pip resolution
     const pairInterval = setInterval(pollActivePair, 8000);
@@ -2082,6 +2216,7 @@
       clearInterval(pairInterval);
       clearInterval(countdownInterval);
       clearInterval(calendarInterval);
+      clearInterval(levelsInterval);
     });
 
     console.log('Platform initialized successfully');

@@ -327,6 +327,75 @@ async function marketSnapshot() {
   return data;
 }
 
+// Map Forex Factory currency codes to readable country names.
+const CCY_COUNTRY = {
+  USD: 'United States', EUR: 'Eurozone', GBP: 'United Kingdom', JPY: 'Japan',
+  CAD: 'Canada', AUD: 'Australia', NZD: 'New Zealand', CHF: 'Switzerland', CNY: 'China'
+};
+
+// Real high-impact economic calendar from Forex Factory's free weekly JSON feed.
+async function fetchForexFactoryCalendar() {
+  const j = await getJson('https://nfs.faireconomy.media/ff_calendar_thisweek.json');
+  if (!Array.isArray(j)) throw new Error('FF feed not an array');
+  const high = j.filter((e) => e && e.impact === 'High');
+  if (!high.length) throw new Error('FF returned no high-impact events');
+  const now = Date.now();
+  return high.map((e) => ({
+    Currency: e.country,
+    Country: CCY_COUNTRY[e.country] || e.country,
+    Event: e.title,
+    DateTime: new Date(e.date).toISOString(),
+    Importance: '3',
+    Previous: e.previous || '',
+    Consensus: e.forecast || '',
+    Actual: e.actual || ''
+  })).sort((a, b) =>
+    Math.abs(new Date(a.DateTime).getTime() - now) - Math.abs(new Date(b.DateTime).getTime() - now)
+  ).slice(0, 12);
+}
+
+// ATR(14) + classic floor-trader pivots from Yahoo gold daily bars.
+async function fetchGoldLevels() {
+  const j = await getJson('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=2mo&interval=1d');
+  const r = j && j.chart && j.chart.result && j.chart.result[0];
+  const q = r && r.indicators && r.indicators.quote && r.indicators.quote[0];
+  const ts = r && r.timestamp;
+  if (!q || !ts) throw new Error('gold daily bars missing');
+
+  const bars = [];
+  for (let i = 0; i < ts.length; i++) {
+    const h = q.high[i], l = q.low[i], c = q.close[i];
+    if ([h, l, c].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      bars.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), h, l, c });
+    }
+  }
+  if (bars.length < 15) throw new Error('not enough daily bars');
+
+  // ATR(14)
+  const trs = [];
+  for (let i = 1; i < bars.length; i++) {
+    const pc = bars[i - 1].c;
+    trs.push(Math.max(bars[i].h - bars[i].l, Math.abs(bars[i].h - pc), Math.abs(bars[i].l - pc)));
+  }
+  const atr = trs.slice(-14).reduce((a, v) => a + v, 0) / Math.min(14, trs.length);
+
+  // Pivots from the last completed session (skip today's forming bar)
+  const today = new Date().toISOString().slice(0, 10);
+  const completed = bars.filter((b) => b.date < today);
+  const piv = (completed.length ? completed : bars)[(completed.length ? completed.length : bars.length) - 1];
+  const P = (piv.h + piv.l + piv.c) / 3;
+  const range = piv.h - piv.l;
+
+  return {
+    pivot: P,
+    r1: 2 * P - piv.l, r2: P + range, r3: piv.h + 2 * (P - piv.l),
+    s1: 2 * P - piv.h, s2: P - range, s3: piv.l - 2 * (piv.h - P),
+    atr,
+    prevHigh: piv.h, prevLow: piv.l, prevClose: piv.c,
+    session: piv.date
+  };
+}
+
 function getHighImpactCalendarEvents() {
   const now = new Date();
   const events = [
@@ -538,13 +607,28 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/calendar') {
     res.setHeader('Content-Type', 'application/json');
+    let events, source;
     try {
-      const events = getHighImpactCalendarEvents();
-      res.writeHead(200, { 'Cache-Control': 'max-age=300' });
-      res.end(JSON.stringify({ ok: true, events, fetchedAt: new Date().toISOString() }));
+      events = await fetchForexFactoryCalendar();
+      source = 'forexfactory';
+    } catch (e) {
+      events = getHighImpactCalendarEvents();
+      source = 'synthetic';
+    }
+    res.writeHead(200, { 'Cache-Control': 'max-age=300' });
+    res.end(JSON.stringify({ ok: true, events, source, fetchedAt: new Date().toISOString() }));
+    return;
+  }
+
+  if (pathname === '/api/levels') {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const levels = await fetchGoldLevels();
+      res.writeHead(200, { 'Cache-Control': 'max-age=120' });
+      res.end(JSON.stringify({ ok: true, ...levels, fetchedAt: new Date().toISOString() }));
     } catch (error) {
-      res.writeHead(500);
-      res.end(JSON.stringify({ ok: false, events: [], errors: [error.message] }));
+      res.writeHead(502);
+      res.end(JSON.stringify({ ok: false, error: error.message }));
     }
     return;
   }
