@@ -408,6 +408,74 @@ async function fetchGoldLevels() {
   return levelsCache;
 }
 
+// ───────── BERG Way live SOP (H1 -> M15 -> M1, EF->EG) ─────────
+async function fetchBars(interval, range) {
+  for (const host of ['query1', 'query2']) {
+    try {
+      const j = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/GC=F?range=${range}&interval=${interval}`);
+      const r = j && j.chart && j.chart.result && j.chart.result[0];
+      const q = r && r.indicators && r.indicators.quote && r.indicators.quote[0];
+      const ts = r && r.timestamp;
+      if (!q || !ts) continue;
+      const bars = [];
+      for (let i = 0; i < ts.length; i++) {
+        const o = q.open[i], h = q.high[i], l = q.low[i], c = q.close[i];
+        if ([o, h, l, c].every(v => typeof v === 'number' && Number.isFinite(v))) bars.push({ t: ts[i], o, h, l, c });
+      }
+      if (bars.length > 5) return bars.slice(0, -1);   // drop the forming bar
+    } catch (e) { /* try next host */ }
+  }
+  throw new Error('bars unavailable: ' + interval);
+}
+
+function egef(bars, side) {
+  const eg = [false], ef = [false];
+  for (let i = 1; i < bars.length; i++) {
+    const { o, h, l, c } = bars[i], po = bars[i-1].o, pc = bars[i-1].c;
+    const cur = Math.abs(c-o), prev = Math.abs(pc-po), big = prev > 0 && cur >= 0.4*prev;
+    if (side === 'sell') { eg.push(c<o && o>=po && c<=pc && big); ef.push(h>=po && c>pc && o>pc && c<o); }
+    else                 { eg.push(c>o && o<=po && c>=pc && big); ef.push(l<=po && c<pc && o<pc && c>o); }
+  }
+  return { eg, ef };
+}
+
+async function fetchBerg(side) {
+  const [h1, m15, m1] = await Promise.all([
+    fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d')
+  ]);
+  const price = m1[m1.length-1].c;
+
+  // 1+2. most recent valid H1 EG/EF zone + is price inside it
+  const H = egef(h1, side); let zone = null;
+  for (let i = h1.length-1; i >= 1 && i > h1.length-25; i--) {
+    if (H.eg[i] || H.ef[i]) {
+      const top = h1[i].h, bot = h1[i].l; let valid = true;
+      for (let j = i+1; j < h1.length; j++) { if (side==='sell' ? h1[j].c > top : h1[j].c < bot) { valid = false; break; } }
+      if (valid) { zone = { top, bot }; break; }
+    }
+  }
+  const cmpInZone = !!(zone && price <= zone.top && price >= zone.bot);
+
+  // 3. recent M15 EG (arm)
+  const M = egef(m15, side); let m15Arm = false;
+  for (let i = m15.length-1; i >= Math.max(1, m15.length-8); i--) { if (M.eg[i]) { m15Arm = true; break; } }
+
+  // 4+5. M1 EF (the "fail") then a confirming M1 EG
+  const m = egef(m1, side); let m1Ef = false, efIdx = -1, m1Eg = false, egBar = null;
+  for (let i = m1.length-1; i >= Math.max(1, m1.length-15); i--) { if (m.ef[i]) { m1Ef = true; efIdx = i; break; } }
+  if (m1Ef) for (let i = efIdx+1; i < m1.length; i++) { if (m.eg[i]) { m1Eg = true; egBar = m1[i]; break; } }
+
+  const signal = !!(zone && cmpInZone && m15Arm && m1Ef && m1Eg);
+  let trade = null;
+  if (signal) {
+    const entry = price, stop = side==='sell' ? egBar.h + 0.5 : egBar.l - 0.5, risk = Math.abs(stop-entry);
+    const tgt = (r) => side==='sell' ? entry - r*risk : entry + r*risk;
+    trade = { entry, stop, t1: tgt(1.5), t2: tgt(2), t3: tgt(3), riskPts: risk };
+  }
+  return { ok: true, side, price, zone,
+    steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
+}
+
 function getHighImpactCalendarEvents() {
   const now = new Date();
   const events = [
@@ -613,6 +681,21 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(502, { 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ok: false, pair, error: error.message }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/berg') {
+    res.setHeader('Content-Type', 'application/json');
+    const params = new URLSearchParams((req.url.split('?')[1]) || '');
+    const dir = ((params.get('dir') || 'sell').toLowerCase() === 'buy') ? 'buy' : 'sell';
+    try {
+      const b = await fetchBerg(dir);
+      res.writeHead(200, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ...b, fetchedAt: new Date().toISOString() }));
+    } catch (error) {
+      res.writeHead(200, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, side: dir, error: error.message || 'berg feed offline' }));
     }
     return;
   }

@@ -1084,6 +1084,35 @@
     .opp-rationale { margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
     .opp-rationale b { color: var(--text-primary); }
 
+    /* ===== Opps layout + BERG side ===== */
+    .opps-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 1100px) { .opps-layout { grid-template-columns: 1fr; } }
+
+    .berg-card {
+      border-radius: 14px; padding: 18px 20px;
+      background: linear-gradient(160deg, #1A1D29 0%, #23283a 100%);
+      color: #fff; box-shadow: var(--shadow-soft); position: relative; overflow: hidden;
+    }
+    .berg-head { display: flex; align-items: center; justify-content: space-between; }
+    .berg-title { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; }
+    .berg-dir { font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 7px; background: rgba(255,255,255,0.1); color: #ffd877; }
+    .berg-dir.long { background: rgba(0,166,81,0.2); color: #4ade80; }
+    .berg-dir.short { background: rgba(194,59,51,0.2); color: #f87171; }
+    .berg-sub { font-size: 10px; color: rgba(255,255,255,0.45); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; margin: 4px 0 14px; }
+    .berg-ladder { display: flex; flex-direction: column; gap: 8px; }
+    .berg-step { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .berg-step .bx { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+    .berg-step.done .bx { background: #00A651; color: #fff; }
+    .berg-step.todo .bx { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.12); }
+    .berg-step.done .lbl { color: #fff; }
+    .berg-step .lbl { color: rgba(255,255,255,0.55); }
+    .berg-signal {
+      margin-top: 14px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 12px; font-weight: 600; line-height: 1.5; color: rgba(255,255,255,0.6);
+    }
+    .berg-signal.fire { color: #4ade80; font-weight: 800; }
+    .berg-trade { margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.8); line-height: 1.7; }
+
     /* ===== Responsive ===== */
     @media (max-width: 1024px) {
       .header { padding: 16px 20px; }
@@ -1178,8 +1207,19 @@
       <div class="section-title">Trade Opportunities</div>
       <div class="section-sub" id="oppsContext">Synthesised from macro bias · pivot levels · news gate</div>
     </div>
-    <div id="oppsGrid" class="opps-grid">
-      <div class="opp-empty">Waiting for live feeds…</div>
+    <div class="opps-layout">
+      <div id="oppsGrid" class="opps-grid">
+        <div class="opp-empty">Waiting for live feeds…</div>
+      </div>
+      <div class="berg-card" id="bergCard">
+        <div class="berg-head">
+          <span class="berg-title">BERG Way</span>
+          <span class="berg-dir" id="bergDir">—</span>
+        </div>
+        <div class="berg-sub">H1 → M15 → M1 · EF→EG (side setup)</div>
+        <div class="berg-ladder" id="bergLadder"></div>
+        <div class="berg-signal" id="bergSignal">Connecting…</div>
+      </div>
     </div>
   </div>
 
@@ -2345,6 +2385,57 @@
     if (ctx) ctx.textContent = `Spot ${fmt(price)} · composite ${comp}% · ${L.real ? 'real pivots' : 'model levels'}${activeEvent ? ` · next: ${activeEvent.Event}` : ''}`;
   }
 
+  // ===== BERG Way side panel (live SOP) =====
+  async function loadBerg() {
+    const card = document.getElementById('bergCard');
+    if (!card) return;
+    const dir = lastZone === 'bull' ? 'buy' : lastZone === 'bear' ? 'sell'
+      : ((state.gold && state.gold.changePct >= 0) ? 'buy' : 'sell');
+    try {
+      const res = await fetch(`${apiBase}/api/berg?dir=${dir}`, { cache: 'no-store' });
+      renderBerg(await res.json(), dir);
+    } catch (e) { renderBerg({ ok: false }, dir); }
+  }
+
+  function renderBerg(b, dir) {
+    const long = dir === 'buy';
+    const dirEl = document.getElementById('bergDir');
+    const ladder = document.getElementById('bergLadder');
+    const sig = document.getElementById('bergSignal');
+    if (dirEl) { dirEl.textContent = long ? 'LONG' : 'SHORT'; dirEl.className = 'berg-dir ' + (long ? 'long' : 'short'); }
+    if (!b || !b.ok) {
+      if (ladder) ladder.innerHTML = '';
+      if (sig) { sig.className = 'berg-signal'; sig.textContent = 'Intraday candle feed offline — BERG unavailable right now.'; }
+      return;
+    }
+    const s = b.steps;
+    const steps = [
+      [`H1 ${long ? 'demand' : 'supply'} zone active`, s.h1Zone],
+      ['Price inside H1 zone', s.cmpInZone],
+      ['M15 EG — arm', s.m15Arm],
+      ['M1 EF — the "fail"', s.m1Ef],
+      ['M1 EG — entry trigger', s.m1Eg]
+    ];
+    if (ladder) ladder.innerHTML = steps.map(([t, ok]) =>
+      `<div class="berg-step ${ok ? 'done' : 'todo'}"><span class="bx">${ok ? '✓' : ''}</span><span class="lbl">${t}</span></div>`).join('');
+    if (sig) {
+      if (b.signal && b.trade) {
+        const t = b.trade, rr = (x) => Math.abs((x - t.entry) / (t.stop - t.entry)).toFixed(1);
+        sig.className = 'berg-signal fire';
+        sig.innerHTML = `${long ? '🟢' : '🔴'} ENTRY — EF→EG confirmed`
+          + `<div class="berg-trade">entry ${fmt(t.entry, 0)} · stop ${fmt(t.stop, 0)} · risk ${fmt(t.riskPts, 0)}pts<br>`
+          + `T1 ${fmt(t.t1, 0)} (${rr(t.t1)}R) · T2 ${fmt(t.t2, 0)} (${rr(t.t2)}R) · T3 ${fmt(t.t3, 0)} (${rr(t.t3)}R)</div>`;
+      } else {
+        sig.className = 'berg-signal';
+        sig.textContent = !s.h1Zone ? 'Waiting for an H1 zone'
+          : !s.cmpInZone ? 'Waiting for price to enter the H1 zone'
+          : !s.m15Arm ? 'In zone — waiting for an M15 EG to arm'
+          : !s.m1Ef ? 'Armed — waiting for the M1 EF (the fail)'
+          : 'EF seen — waiting for the M1 EG to confirm';
+      }
+    }
+  }
+
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
@@ -2366,6 +2457,10 @@
 
     // Refresh pivot/ATR levels every 5 minutes
     const levelsInterval = setInterval(loadLevels, 300000);
+
+    // BERG live SOP side panel (3 intraday Yahoo calls) — every 60s
+    setTimeout(loadBerg, 2500);
+    const bergInterval = setInterval(loadBerg, 60000);
 
     // Poll the active pair every 8s for true 1-min / 5-min pip resolution
     const pairInterval = setInterval(pollActivePair, 8000);
@@ -2389,6 +2484,7 @@
       clearInterval(countdownInterval);
       clearInterval(calendarInterval);
       clearInterval(levelsInterval);
+      clearInterval(bergInterval);
     });
 
     console.log('Platform initialized successfully');
