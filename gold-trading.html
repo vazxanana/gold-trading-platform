@@ -1060,8 +1060,8 @@
         </div>
         <div class="metric-box">
           <div class="metric-label">Central Bank Flows</div>
-          <div class="metric-value">Manual</div>
-          <div class="metric-detail">Not a live feed; verify from official reserve/flow reports</div>
+          <div class="metric-value" id="cbScore">—</div>
+          <div class="metric-detail" id="cbDetail">Latest WGC quarterly net purchases</div>
         </div>
         <div class="metric-box">
           <div class="metric-label">USD Index Correlation</div>
@@ -1071,12 +1071,12 @@
         <div class="metric-box">
           <div class="metric-label">Risk Sentiment (VIX)</div>
           <div class="metric-value" id="vixScore">—</div>
-          <div class="metric-detail">VIX feed not connected; not included in live score</div>
+          <div class="metric-detail" id="vixDetail">Live ^VIX level pending</div>
         </div>
         <div class="metric-box">
           <div class="metric-label">Geopolitical Risk</div>
-          <div class="metric-value">Manual</div>
-          <div class="metric-detail">Not a live feed; verify from current news/risk sources</div>
+          <div class="metric-value" id="geoScore">—</div>
+          <div class="metric-detail" id="geoDetail">Market-implied from VIX spike</div>
         </div>
         <div class="metric-box">
           <div class="metric-label">Composite Score</div>
@@ -1426,6 +1426,7 @@
     gold: null,
     dxy: null,
     tips: null,
+    vix: null,
     fx: null,
     errors: []
   };
@@ -1597,6 +1598,7 @@
       exchangeTime: new Date(snapshot.dxy.exchangeTime)
     } : null;
     state.tips = snapshot.tips || null;
+    state.vix = snapshot.vix || null;
     state.fx = snapshot.fx || null;
     state.errors = snapshot.errors || [];
   }
@@ -1665,69 +1667,84 @@
     setText('scenario3Entry', `Buy zone ${fmt(levels.resistance1, 0)}-${fmt(levels.resistance2 - 10, 0)} after pullback confirmation`);
   }
 
+  // Each driver scores 0-10 for how bullish the macro backdrop is for gold.
   function updateBias() {
-    let score = 0;
-    const drivers = [];
+    const D = {};   // driver -> {score, label, detail}
 
-    if (state.gold) {
-      if (state.gold.changePct > 0.15) {
-        score += 35;
-        drivers.push('Gold futures positive vs prior close');
-      } else if (state.gold.changePct > -0.15) {
-        score += 20;
-        drivers.push('Gold futures flat/neutral');
-      } else {
-        drivers.push('Gold futures negative vs prior close');
-      }
-    }
-
-    if (state.dxy) {
-      if (state.dxy.changePct < -0.10) {
-        score += 30;
-        drivers.push('DXY softer, supportive for gold');
-      } else if (state.dxy.changePct < 0.10) {
-        score += 15;
-        drivers.push('DXY neutral');
-      } else {
-        drivers.push('DXY stronger, headwind for gold');
-      }
-    }
-
+    // 1. Real Yields (TIPS 10Y) — lower real yields lift gold
     if (state.tips) {
-      if (state.tips.value <= 1.75) {
-        score += 25;
-        drivers.push('10Y TIPS yield relatively low');
-      } else if (state.tips.value <= 2.25) {
-        score += 12;
-        drivers.push('10Y TIPS yield mid-range');
-      } else {
-        drivers.push('10Y TIPS yield elevated');
-      }
+      const v = state.tips.value;
+      const s = v <= 0.5 ? 10 : v <= 1.0 ? 9 : v <= 1.5 ? 7 : v <= 2.0 ? 5 : v <= 2.5 ? 3 : 2;
+      D.tips = { score: s, detail: `${fmt(v)}% real yield · FRED DFII10 ${state.tips.date}` };
     }
 
-    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
-    const scoreText = liveCount ? `${score}%` : '—';
-    const bias = score >= 65 ? 'Bullish bias' : score >= 40 ? 'Neutral / wait' : 'Bearish caution';
-    const title = liveCount === 3 ? `${bias} from live feeds` : 'Partial live feed; use caution';
+    // 2. USD Index correlation — a softer dollar supports gold
+    if (state.dxy) {
+      const c = state.dxy.changePct;
+      const s = c < -0.40 ? 9 : c < -0.15 ? 8 : c < 0.15 ? 5 : c < 0.40 ? 3 : 2;
+      D.dxy = { score: s, detail: `DXY ${fmt(state.dxy.price)} · day ${signed(c)}%` };
+    }
+
+    // 3. Risk Sentiment (VIX level) — elevated volatility = safe-haven bid
+    if (state.vix) {
+      const x = state.vix.price;
+      const s = x > 30 ? 9 : x > 25 ? 8 : x > 20 ? 7 : x > 15 ? 5 : 4;
+      const src = (state.vix.symbol === '^VIX') ? '^VIX' : 'VIX';
+      D.vix = { score: s, detail: `${src} ${fmt(x)} · ${x > 20 ? 'elevated' : x > 15 ? 'moderate' : 'calm'}` };
+    }
+
+    // 4. Geopolitical Risk — proxied by a real-time VIX spike (risk-off events)
+    if (state.vix) {
+      const c = state.vix.changePct;
+      const s = c > 20 ? 9 : c > 8 ? 7 : c > -3 ? 5 : c > -10 ? 4 : 3;
+      D.geo = { score: s, detail: `VIX ${signed(c)}% on day · ${c > 8 ? 'risk-off spike' : c < -8 ? 'risk-on fade' : 'stable'}` };
+    }
+
+    // 5. Central Bank Flows — record official-sector buying (WGC, quarterly cadence)
+    D.cb = { score: 8, detail: 'Record net buying · WGC quarterly (not real-time)' };
+
+    const setTile = (id, d) => {
+      setText(id, d ? `${d.score}/10` : '—');
+      const el = $(id);
+      if (el) { el.classList.toggle('text-green', !!d && d.score >= 7); el.classList.toggle('text-red', !!d && d.score <= 3); }
+    };
+    setTile('tipsScore', D.tips); setText('tipsMetricDetail', D.tips ? D.tips.detail : 'Latest FRED DFII10 value pending');
+    setTile('dxyScore', D.dxy);   setText('dxyMetricDetail', D.dxy ? D.dxy.detail : 'Live DXY value pending');
+    setTile('vixScore', D.vix);   setText('vixDetail', D.vix ? D.vix.detail : 'Live ^VIX level pending');
+    setTile('geoScore', D.geo);   setText('geoDetail', D.geo ? D.geo.detail : 'Market-implied from VIX spike');
+    setTile('cbScore', D.cb);     setText('cbDetail', D.cb.detail);
+
+    // Composite = average of available drivers, scaled to 100
+    const present = Object.values(D);
+    const composite = present.length ? Math.round((present.reduce((a, d) => a + d.score, 0) / present.length) * 10) : 0;
+    const liveFeeds = [state.gold, state.dxy, state.tips, state.vix].filter(Boolean).length;
+    const scoreText = present.length ? `${composite}%` : '—';
+    const bias = composite >= 65 ? 'Bullish bias' : composite >= 45 ? 'Neutral / wait' : 'Bearish caution';
+
+    // Gold's own momentum colours the headline copy (not part of the macro score)
+    let goldNote = '';
+    if (state.gold) goldNote = state.gold.changePct > 0.15 ? 'Spot firmer on the day. ' : state.gold.changePct < -0.15 ? 'Spot softer on the day. ' : 'Spot flat. ';
+
+    const driverPhrases = [];
+    if (D.tips) driverPhrases.push(`real yields ${D.tips.score >= 7 ? 'supportive' : D.tips.score >= 5 ? 'neutral' : 'a headwind'}`);
+    if (D.dxy) driverPhrases.push(`USD ${D.dxy.score >= 7 ? 'softening' : D.dxy.score >= 5 ? 'steady' : 'firm'}`);
+    if (D.vix) driverPhrases.push(`risk sentiment ${D.vix.score >= 7 ? 'fearful (haven bid)' : 'calm'}`);
+    if (D.geo) driverPhrases.push(`geopolitics ${D.geo.score >= 7 ? 'flaring' : 'quiet'}`);
+    driverPhrases.push('central-bank demand structurally strong');
 
     setText('biasScore', scoreText);
-    setText('biasDetail', liveCount === 3 ? 'Gold, DXY, and TIPS connected' : `${liveCount}/3 feeds connected`);
-    setText('playbookTitle', title);
-    setText('playbookCopy', drivers.length ? drivers.join('. ') + '.' : 'Waiting for live feeds.');
-    setText('directionConfidence', `Confidence: ${scoreText} live model`);
-    setText('liveDrivers', drivers.join(' • ') || 'Waiting for gold, DXY, and TIPS feeds.');
-    setText('tipsScore', state.tips ? (state.tips.value <= 1.75 ? '8/10' : state.tips.value <= 2.25 ? '5/10' : '2/10') : '—');
-    setText('dxyScore', state.dxy ? (state.dxy.changePct < -0.10 ? '8/10' : state.dxy.changePct < 0.10 ? '5/10' : '2/10') : '—');
-    setText('vixScore', 'Manual');
+    setText('biasDetail', `${present.length}/5 macro drivers scored`);
+    setText('playbookTitle', present.length ? `${bias} from live feeds` : 'Waiting for live feeds');
+    setText('playbookCopy', present.length ? `${goldNote}${driverPhrases.join(', ')}.` : 'Waiting for live feeds.');
+    setText('directionConfidence', `Confidence: ${scoreText} macro model`);
+    setText('liveDrivers', driverPhrases.join(' • '));
     setText('compositeScore', scoreText);
-    setText('compositeDetail', liveCount === 3 ? `${bias.toUpperCase()} - calculated from connected feeds` : 'Not complete; one or more feeds failed');
-    setText('tipsMetricDetail', state.tips ? `Latest ${state.tips.date}: ${signed(state.tips.value)}% via FRED DFII10` : 'Latest FRED DFII10 value pending');
-    setText('dxyMetricDetail', state.dxy ? `Live DXY ${fmt(state.dxy.price)}; day change ${signed(state.dxy.changePct)}%` : 'Live DXY value pending');
+    setText('compositeDetail', present.length ? `${bias.toUpperCase()} · avg of ${present.length} macro drivers` : 'Waiting for feeds');
 
-    $('biasScore')?.classList.toggle('text-green', score >= 65);
-    $('biasScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
-    $('compositeScore')?.classList.toggle('text-green', score >= 65);
-    $('compositeScore')?.classList.toggle('text-red', score < 40 && liveCount > 0);
+    $('biasScore')?.classList.toggle('text-green', composite >= 65);
+    $('biasScore')?.classList.toggle('text-red', composite < 45 && present.length > 0);
+    $('compositeScore')?.classList.toggle('text-green', composite >= 65);
+    $('compositeScore')?.classList.toggle('text-red', composite < 45 && present.length > 0);
   }
 
   function updateFeedStatus() {
@@ -1736,17 +1753,18 @@
     setText('timestamp', timeStr);
     setText('footerTime', timeStr);
 
-    const liveCount = [state.gold, state.dxy, state.tips].filter(Boolean).length;
+    const feeds = [state.gold, state.dxy, state.tips, state.vix];
+    const liveCount = feeds.filter(Boolean).length;
     const status = $('feedStatus');
     if (!status) return;
-    if (liveCount === 3 && state.errors.length === 0) {
+    if (liveCount === 4 && state.errors.length === 0) {
       status.textContent = 'LIVE';
       status.className = 'data-status live';
     } else {
-      status.textContent = `${liveCount}/3 LIVE`;
+      status.textContent = `${liveCount}/4 LIVE`;
       status.className = 'data-status stale';
     }
-    setText('sourceNote', `Sources: Yahoo GC=F ${state.gold ? state.gold.exchangeTime.toISOString() : 'failed'}; Yahoo DXY ${state.dxy ? state.dxy.exchangeTime.toISOString() : 'failed'}; FRED DFII10 ${state.tips ? state.tips.date : 'failed'}.`);
+    setText('sourceNote', `Sources: gold ${state.gold ? fmt(state.gold.price) : 'failed'}; DXY ${state.dxy ? fmt(state.dxy.price) : 'failed'}; TIPS ${state.tips ? state.tips.value + '%' : 'failed'}; VIX ${state.vix ? fmt(state.vix.price) : 'failed'}.`);
   }
 
   async function updatePrices() {

@@ -78,8 +78,27 @@ function parseTips(payload) {
 // --- Datacenter-friendly live fallbacks (Yahoo blocks datacenter IPs like Railway) ---
 const FALLBACK_FEEDS = {
   goldApi: 'https://api.gold-api.com/price/XAU',
-  fxRates: 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,JPY,GBP,CAD,SEK,CHF'
+  fxRates: 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,JPY,GBP,CAD,SEK,CHF',
+  vix: `https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=8`
 };
+
+// VIX via FRED VIXCLS (daily close) — reliable from datacenters when Yahoo ^VIX is blocked.
+async function fetchVixFallback() {
+  const j = await getJson(FALLBACK_FEEDS.vix);
+  const obs = ((j && j.observations) || []).filter((o) => o.value && o.value !== '.');
+  if (obs.length < 1) throw new Error('FRED VIXCLS empty');
+  const price = Number(obs[0].value);
+  const prev = obs.length > 1 ? Number(obs[1].value) : price;
+  if (!Number.isFinite(price)) throw new Error('FRED VIXCLS invalid');
+  return {
+    label: 'VIX', symbol: '^VIX',
+    price,
+    previousClose: prev,
+    change: price - prev,
+    changePct: prev ? ((price - prev) / prev) * 100 : 0,
+    exchangeTime: new Date(obs[0].date).toISOString()
+  };
+}
 
 // Last validated prior-session close used as a stable change baseline when the
 // fallback source only provides spot price (gold-api has no previous close).
@@ -273,8 +292,15 @@ async function marketSnapshot() {
 
   if (vix.status === 'fulfilled') {
     data.vix = vix.value;
+    data.sources.vix = 'Yahoo Finance chart API ^VIX';
   } else {
-    errors.push('VIX API: ' + (vix.reason ? vix.reason.message : 'Unknown error'));
+    errors.push('VIX Yahoo failed: ' + (vix.reason ? vix.reason.message : 'Unknown error'));
+    try {
+      data.vix = await fetchVixFallback();
+      data.sources.vix = 'FRED VIXCLS (daily close)';
+    } catch (e2) {
+      errors.push('VIX fallback failed: ' + e2.message);
+    }
   }
 
   if (tips.status === 'fulfilled') data.tips = tips.value;
