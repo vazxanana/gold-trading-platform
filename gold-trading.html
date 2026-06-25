@@ -1032,6 +1032,58 @@
     .alert-bar.alert-neutral { background: linear-gradient(90deg, #E3A008, #f0b62e); color: #1A1D29; }
     .alert-bar.alert-event { background: linear-gradient(90deg, #0052CC, #2b7de0); }
 
+    /* ===== Trade Opportunities ===== */
+    .section-sub { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.3px; }
+    .opps-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .opp-empty { padding: 22px; color: var(--text-tertiary); font-size: 13px; }
+    .opp-card {
+      position: relative;
+      border-radius: 14px;
+      padding: 18px 20px;
+      background: var(--glass-light);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+    .opp-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    }
+    .opp-long::before { background: linear-gradient(180deg, #00A651, #2bc46f); }
+    .opp-short::before { background: linear-gradient(180deg, #C23B33, #e0584f); }
+    .opp-wait::before { background: linear-gradient(180deg, #E3A008, #f0b62e); }
+    .opp-flat::before { background: var(--border); }
+
+    .opp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .opp-dir {
+      font-size: 12px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 4px 11px; border-radius: 7px;
+    }
+    .opp-dir.long { background: rgba(0,166,81,0.13); color: var(--accent-green); }
+    .opp-dir.short { background: rgba(194,59,51,0.13); color: var(--accent-red); }
+    .opp-dir.wait, .opp-dir.flat { background: var(--bg-tertiary); color: var(--text-secondary); }
+    .opp-conv { font-size: 11px; color: var(--text-tertiary); font-weight: 600; text-align: right; }
+    .opp-conv b { font-family: 'JetBrains Mono', monospace; color: var(--text-primary); font-size: 14px; display: block; }
+    .opp-name { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 8px 0 2px; }
+    .opp-status {
+      font-size: 11.5px; font-weight: 600; margin-bottom: 14px;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .opp-status .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .st-active { color: var(--accent-green); } .st-active .dot { background: var(--accent-green); box-shadow: 0 0 0 3px rgba(0,166,81,.15); }
+    .st-pending { color: var(--accent-amber); } .st-pending .dot { background: var(--accent-amber); }
+    .st-wait { color: var(--accent-red); } .st-wait .dot { background: var(--accent-red); }
+    .st-flat { color: var(--text-tertiary); } .st-flat .dot { background: var(--text-tertiary); }
+
+    .opp-levels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 12px; }
+    .opp-lv { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border-light); }
+    .opp-lv .k { color: var(--text-tertiary); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.5px; font-weight: 700; }
+    .opp-lv .v { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-primary); }
+    .opp-lv .v small { color: var(--text-tertiary); font-weight: 500; }
+    .opp-rationale { margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+    .opp-rationale b { color: var(--text-primary); }
+
     /* ===== Responsive ===== */
     @media (max-width: 1024px) {
       .header { padding: 16px 20px; }
@@ -1117,6 +1169,17 @@
       <div class="brief-kicker">Invalidation</div>
       <div class="brief-number text-red" id="briefInvalidation">—</div>
       <div class="brief-copy">Calculated risk level</div>
+    </div>
+  </div>
+
+  <!-- TRADE OPPORTUNITIES -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Trade Opportunities</div>
+      <div class="section-sub" id="oppsContext">Synthesised from macro bias · pivot levels · news gate</div>
+    </div>
+    <div id="oppsGrid" class="opps-grid">
+      <div class="opp-empty">Waiting for live feeds…</div>
     </div>
   </div>
 
@@ -1484,6 +1547,9 @@
   let lastGoldPrice = null;
   let prevGoldPrice = null;
   let fallbackTimer = null;
+  let currentLevels = null;   // resolved pivots/ATR for the opportunity engine
+  let lastComposite = null;   // macro composite 0-100
+  let lastZone = null;        // 'bull' | 'neutral' | 'bear'
 
   const apiKeys = {
     fred: localStorage.getItem('fred_api_key') || '4d4ee6e804ae4c3cbe36e3678391f0ae',
@@ -1732,6 +1798,14 @@
       stopDesc = `Model risk ${fmt(p - levels.stop)} points from current spot price`;
     }
 
+    // Resolved levels shared with the Trade Opportunities engine
+    currentLevels = {
+      ...levels,
+      pivot: (L && Number.isFinite(L.pivot)) ? Math.round(L.pivot) : roundLevel(p),
+      atr: (L && Number.isFinite(L.atr)) ? L.atr : p * 0.005,
+      real: !!(L && Number.isFinite(L.pivot))
+    };
+
     setText('briefEntry', fmt(levels.entry, 0));
     setText('briefInvalidation', fmt(levels.stop, 0));
     setText('entryPrice', fmt(levels.entry, 0));
@@ -1834,6 +1908,9 @@
     setText('compositeDetail', present.length ? `${bias.toUpperCase()} · avg of ${present.length} macro drivers` : 'Waiting for feeds');
 
     const zone = composite >= 65 ? 'bull' : composite >= 45 ? 'neutral' : 'bear';
+    lastComposite = present.length ? composite : null;
+    lastZone = present.length ? zone : null;
+    generateOpportunities();
     const gauge = $('biasGauge');
     if (gauge) {
       gauge.style.width = present.length ? `${composite}%` : '0%';
@@ -2103,7 +2180,7 @@
     try {
       const res = await fetch(`${apiBase}/api/levels`, { cache: 'no-store' });
       const d = await res.json();
-      if (d && d.ok) { state.levels = d; updateLevels(); }
+      if (d && d.ok) { state.levels = d; updateLevels(); generateOpportunities(); }
     } catch (e) { console.warn('Levels fetch failed:', e.message); }
   }
 
@@ -2171,6 +2248,101 @@
       alertedEventKey = key;
       showAlert(`⏱ ${evFlag(ev)} ${ev.Event} in ${Math.ceil(mins)} min — watch ${pairLabel(evPair(ev))}`, 'alert-event');
     }
+  }
+
+  // ===== Trade Opportunities engine =====
+  function oppCard(o) {
+    const lv = (k, v, sub) => `<div class="opp-lv"><span class="k">${k}</span><span class="v">${v}${sub ? ` <small>${sub}</small>` : ''}</span></div>`;
+    let levelsHtml = '';
+    if (!o.flat) {
+      const risk = Math.abs(o.entry - o.stop);
+      const rr = (t) => (risk > 0 ? Math.abs((t - o.entry) / risk).toFixed(1) + 'R' : '—');
+      levelsHtml = `<div class="opp-levels">
+        ${lv('Entry', fmt(o.entry, 0))}
+        ${lv('Stop', fmt(o.stop, 0))}
+        ${lv('Target 1', fmt(o.t1, 0), rr(o.t1))}
+        ${lv('Target 2', fmt(o.t2, 0), rr(o.t2))}
+        ${lv('Target 3', fmt(o.t3, 0), rr(o.t3))}
+        ${lv('Risk', fmt(risk, 0) + ' pts')}
+      </div>`;
+    }
+    return `<div class="opp-card ${o.cls}">
+      <div class="opp-head">
+        <span class="opp-dir ${o.dir}">${o.dirLabel}</span>
+        <span class="opp-conv">Conviction<b>${Math.round(o.conv)}%</b></span>
+      </div>
+      <div class="opp-name">${o.name}</div>
+      <div class="opp-status ${o.statusCls}"><span class="dot"></span>${o.status}</div>
+      ${levelsHtml}
+      <div class="opp-rationale">${o.rationale}</div>
+    </div>`;
+  }
+
+  function generateOpportunities() {
+    const grid = document.getElementById('oppsGrid');
+    if (!grid) return;
+    const price = state.gold && state.gold.price;
+    if (!price || !currentLevels || lastComposite === null) {
+      grid.innerHTML = '<div class="opp-empty">Waiting for live feeds…</div>';
+      return;
+    }
+    const L = currentLevels, atr = L.atr, comp = lastComposite, zone = lastZone;
+    const newsMins = activeEvent ? (new Date(activeEvent.DateTime).getTime() - Date.now()) / 60000 : Infinity;
+    const newsImminent = newsMins > 0 && newsMins <= 30;
+    const newsTxt = activeEvent ? `Stand aside — ${evFlag(activeEvent)} ${activeEvent.Event} in ${Math.ceil(newsMins)}m` : '';
+    const near = 0.4 * atr;
+    const cards = [];
+
+    if (zone === 'bull' || zone === 'bear') {
+      const long = zone === 'bull';
+      const conv = long ? comp : 100 - comp;
+
+      // 1) Pullback to value (mean-reversion with the macro bias)
+      const pEntry = long ? L.support1 : L.resistance1;
+      const pStop = long ? Math.round(L.support2 - 0.25 * atr) : Math.round(L.resistance2 + 0.25 * atr);
+      let pStatus, pCls;
+      const inBuy = long && price <= L.support1 + near && price >= pStop;
+      const inSell = !long && price >= L.resistance1 - near && price <= pStop;
+      if (newsImminent) { pStatus = newsTxt; pCls = 'st-wait'; }
+      else if (inBuy || inSell) { pStatus = `Active — price in ${long ? 'buy' : 'sell'} zone`; pCls = 'st-active'; }
+      else if ((long && price < pStop) || (!long && price > pStop)) { pStatus = `Invalidated — ${long ? 'below S2' : 'above R2'}`; pCls = 'st-wait'; }
+      else { pStatus = `Pending — wait for ${long ? 'pullback to S1' : 'rally to R1'}`; pCls = 'st-pending'; }
+      cards.push(oppCard({
+        cls: long ? 'opp-long' : 'opp-short', dir: long ? 'long' : 'short', dirLabel: long ? 'LONG' : 'SHORT', conv,
+        name: long ? 'Pullback buy → support (S1)' : 'Pullback sell → resistance (R1)',
+        status: pStatus, statusCls: pCls,
+        entry: pEntry, stop: pStop, t1: L.pivot, t2: long ? L.resistance1 : L.support1, t3: long ? L.resistance2 : L.support2,
+        rationale: `Macro composite <b>${comp}%</b> → ${long ? 'bullish' : 'bearish'} bias. ${long ? 'Buy the dip into the pivot support' : 'Sell the rally into the pivot resistance'}; invalidate ${long ? 'below S2' : 'above R2'}. ${L.real ? 'Real floor-trader pivots' : 'Model levels (pivots offline)'}.`
+      }));
+
+      // 2) Breakout / momentum continuation
+      const bEntry = long ? L.resistance1 : L.support1;
+      const bStop = long ? Math.round(L.pivot) : Math.round(L.pivot);
+      let bStatus, bCls;
+      if (newsImminent) { bStatus = newsTxt; bCls = 'st-wait'; }
+      else if ((long && price > L.resistance1) || (!long && price < L.support1)) { bStatus = 'Active — breakout underway'; bCls = 'st-active'; }
+      else if (Math.abs(price - bEntry) <= near) { bStatus = `Pending — testing ${long ? 'R1' : 'S1'}`; bCls = 'st-pending'; }
+      else { bStatus = `Pending — needs ${long ? 'break above R1' : 'break below S1'}`; bCls = 'st-pending'; }
+      cards.push(oppCard({
+        cls: long ? 'opp-long' : 'opp-short', dir: long ? 'long' : 'short', dirLabel: long ? 'LONG' : 'SHORT', conv: Math.max(0, conv - 12),
+        name: long ? 'Breakout buy → above R1' : 'Breakdown sell → below S1',
+        status: bStatus, statusCls: bCls,
+        entry: bEntry, stop: bStop, t1: long ? L.resistance2 : L.support2, t2: long ? L.resistance3 : L.support3, t3: long ? Math.round(L.resistance3 + atr) : Math.round(L.support3 - atr),
+        rationale: `Momentum continuation with the ${long ? 'bullish' : 'bearish'} macro. Enter on a ${long ? 'break/retest of R1' : 'break/retest of S1'}, stop back through the pivot. Riskier than the pullback — sized lower.`
+      }));
+    } else {
+      cards.push(oppCard({
+        cls: 'opp-flat', dir: 'flat', dirLabel: 'NO BIAS', conv: 50, flat: true,
+        name: 'Range — stand aside or fade extremes',
+        status: newsImminent ? newsTxt : 'No directional edge — macro neutral (45–65%)',
+        statusCls: newsImminent ? 'st-wait' : 'st-flat',
+        rationale: `Composite <b>${comp}%</b> is in the neutral band. No trend trade. Intraday you can fade the pivot extremes (buy ${fmt(L.support1, 0)} / sell ${fmt(L.resistance1, 0)}) with tight risk, or wait for the bias to resolve above 65% / below 45%.`
+      }));
+    }
+
+    grid.innerHTML = cards.join('');
+    const ctx = document.getElementById('oppsContext');
+    if (ctx) ctx.textContent = `Spot ${fmt(price)} · composite ${comp}% · ${L.real ? 'real pivots' : 'model levels'}${activeEvent ? ` · next: ${activeEvent.Event}` : ''}`;
   }
 
   // Initialize when DOM is ready
