@@ -355,8 +355,19 @@ async function fetchForexFactoryCalendar() {
 }
 
 // ATR(14) + classic floor-trader pivots from Yahoo gold daily bars.
+let levelsCache = null;   // last good levels (pivots change daily; cache survives Yahoo blocks)
+
 async function fetchGoldLevels() {
-  const j = await getJson('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=2mo&interval=1d');
+  // Try both Yahoo hosts — reachability from datacenters is intermittent.
+  const hosts = ['query1', 'query2'];
+  let j = null, lastErr = null;
+  for (const host of hosts) {
+    try {
+      j = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/GC=F?range=2mo&interval=1d`);
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!j) throw new Error('gold daily bars unreachable: ' + (lastErr && lastErr.message || 'unknown'));
   const r = j && j.chart && j.chart.result && j.chart.result[0];
   const q = r && r.indicators && r.indicators.quote && r.indicators.quote[0];
   const ts = r && r.timestamp;
@@ -386,7 +397,7 @@ async function fetchGoldLevels() {
   const P = (piv.h + piv.l + piv.c) / 3;
   const range = piv.h - piv.l;
 
-  return {
+  levelsCache = {
     pivot: P,
     r1: 2 * P - piv.l, r2: P + range, r3: piv.h + 2 * (P - piv.l),
     s1: 2 * P - piv.h, s2: P - range, s3: piv.l - 2 * (piv.h - P),
@@ -394,6 +405,7 @@ async function fetchGoldLevels() {
     prevHigh: piv.h, prevLow: piv.l, prevClose: piv.c,
     session: piv.date
   };
+  return levelsCache;
 }
 
 function getHighImpactCalendarEvents() {
@@ -627,8 +639,13 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Cache-Control': 'max-age=120' });
       res.end(JSON.stringify({ ok: true, ...levels, fetchedAt: new Date().toISOString() }));
     } catch (error) {
-      res.writeHead(502);
-      res.end(JSON.stringify({ ok: false, error: error.message }));
+      if (levelsCache) {
+        res.writeHead(200, { 'Cache-Control': 'max-age=120' });
+        res.end(JSON.stringify({ ok: true, ...levelsCache, cached: true, fetchedAt: new Date().toISOString() }));
+      } else {
+        res.writeHead(502);
+        res.end(JSON.stringify({ ok: false, error: error.message || 'levels unavailable' }));
+      }
     }
     return;
   }
