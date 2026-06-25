@@ -409,7 +409,24 @@ async function fetchGoldLevels() {
 }
 
 // ───────── BERG Way live SOP (H1 -> M15 -> M1, EF->EG) ─────────
+// Optional datacenter-reliable intraday provider (Twelve Data). Set TWELVEDATA_KEY
+// in the Railway env to make cloud BERG/levels reliable; otherwise falls back to Yahoo.
+const TD_KEY = process.env.TWELVEDATA_KEY || '';
+const TD_INT = { '60m': '1h', '15m': '15min', '1m': '1min' };
+
 async function fetchBars(interval, range) {
+  if (TD_KEY && TD_INT[interval]) {
+    try {
+      const j = await getJson(`https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=${TD_INT[interval]}&outputsize=150&order=ASC&apikey=${TD_KEY}`);
+      if (j && Array.isArray(j.values)) {
+        const bars = j.values.map(v => ({
+          t: Math.floor(new Date(v.datetime).getTime() / 1000),
+          o: +v.open, h: +v.high, l: +v.low, c: +v.close
+        })).filter(b => [b.o, b.h, b.l, b.c].every(Number.isFinite));
+        if (bars.length > 5) return bars.slice(0, -1);
+      }
+    } catch (e) { /* fall through to Yahoo */ }
+  }
   for (const host of ['query1', 'query2']) {
     try {
       const j = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/GC=F?range=${range}&interval=${interval}`);
@@ -466,11 +483,22 @@ async function fetchBerg(side) {
   if (m1Ef) for (let i = efIdx+1; i < m1.length; i++) { if (m.eg[i]) { m1Eg = true; egBar = m1[i]; break; } }
 
   const signal = !!(zone && cmpInZone && m15Arm && m1Ef && m1Eg);
+
+  // Always surface entry/SL/TP once price is in a zone: a tight LIVE stop on the
+  // M1 trigger candle when fired, else a PLAN stop beyond the H1 zone.
   let trade = null;
-  if (signal) {
-    const entry = price, stop = side==='sell' ? egBar.h + 0.5 : egBar.l - 0.5, risk = Math.abs(stop-entry);
-    const tgt = (r) => side==='sell' ? entry - r*risk : entry + r*risk;
-    trade = { entry, stop, t1: tgt(1.5), t2: tgt(2), t3: tgt(3), riskPts: risk };
+  if (zone && cmpInZone) {
+    const entry = price;
+    const live = signal && !!egBar;
+    const stop = live
+      ? (side === 'sell' ? egBar.h + 0.5 : egBar.l - 0.5)
+      : (side === 'sell' ? zone.top + 0.5 : zone.bot - 0.5);
+    const risk = Math.abs(stop - entry);
+    if (risk > 0) {
+      const tgt = (r) => side === 'sell' ? entry - r * risk : entry + r * risk;
+      trade = { entry, stop, t1: tgt(1.5), t2: tgt(2), t3: tgt(3), riskPts: risk,
+        live, at: live ? egBar.t : null };
+    }
   }
   return { ok: true, side, price, zone,
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };

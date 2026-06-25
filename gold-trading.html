@@ -1112,6 +1112,25 @@
     }
     .berg-signal.fire { color: #4ade80; font-weight: 800; }
     .berg-trade { margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.8); line-height: 1.7; }
+    .berg-plan { margin-top: 12px; }
+    .berg-plan .pl-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.7px; font-weight: 800; padding: 2px 8px; border-radius: 5px; }
+    .berg-plan .pl-tag.live { background: rgba(0,166,81,0.25); color: #4ade80; }
+    .berg-plan .pl-tag.plan { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+    .berg-plan .pl-rows { margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+    .berg-plan .pl-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
+    .berg-plan .pl-row .k { color: rgba(255,255,255,0.5); }
+    .berg-plan .pl-row .v { color: #fff; font-weight: 600; }
+    .berg-plan .pl-row .v small { color: rgba(255,255,255,0.45); }
+    .berg-plan .pl-row.sl .v { color: #f87171; } .berg-plan .pl-row.tp .v { color: #4ade80; }
+
+    .berg-hist { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .berg-hist .h-title { display: flex; justify-content: space-between; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(255,255,255,0.45); font-weight: 700; margin-bottom: 8px; }
+    .berg-hist .h-title b { color: #fff; }
+    .berg-hist .h-row { display: flex; justify-content: space-between; font-size: 10.5px; font-family: 'JetBrains Mono', monospace; color: rgba(255,255,255,0.7); padding: 2px 0; }
+    .berg-hist .h-row .res-win { color: #4ade80; font-weight: 700; }
+    .berg-hist .h-row .res-loss { color: #f87171; font-weight: 700; }
+    .berg-hist .h-row .res-open { color: #ffd877; }
+    .berg-hist .h-empty { font-size: 10.5px; color: rgba(255,255,255,0.4); }
 
     /* ===== Responsive ===== */
     @media (max-width: 1024px) {
@@ -1219,6 +1238,8 @@
         <div class="berg-sub">H1 → M15 → M1 · EF→EG (side setup)</div>
         <div class="berg-ladder" id="bergLadder"></div>
         <div class="berg-signal" id="bergSignal">Connecting…</div>
+        <div class="berg-plan" id="bergTrade"></div>
+        <div class="berg-hist" id="bergHistory"></div>
       </div>
     </div>
   </div>
@@ -1994,6 +2015,7 @@
       updateLevels();
       updateBias();
       updateFeedStatus();
+      updateBergHistory();
       if (state.errors.length) console.warn('Market feed warnings:', state.errors);
       return;
     } catch (error) {
@@ -2402,10 +2424,13 @@
     const dirEl = document.getElementById('bergDir');
     const ladder = document.getElementById('bergLadder');
     const sig = document.getElementById('bergSignal');
+    const planEl = document.getElementById('bergTrade');
     if (dirEl) { dirEl.textContent = long ? 'LONG' : 'SHORT'; dirEl.className = 'berg-dir ' + (long ? 'long' : 'short'); }
     if (!b || !b.ok) {
       if (ladder) ladder.innerHTML = '';
+      if (planEl) planEl.innerHTML = '';
       if (sig) { sig.className = 'berg-signal'; sig.textContent = 'Intraday candle feed offline — BERG unavailable right now.'; }
+      renderBergHistory();
       return;
     }
     const s = b.steps;
@@ -2418,14 +2443,11 @@
     ];
     if (ladder) ladder.innerHTML = steps.map(([t, ok]) =>
       `<div class="berg-step ${ok ? 'done' : 'todo'}"><span class="bx">${ok ? '✓' : ''}</span><span class="lbl">${t}</span></div>`).join('');
+
+    // Status line
     if (sig) {
-      if (b.signal && b.trade) {
-        const t = b.trade, rr = (x) => Math.abs((x - t.entry) / (t.stop - t.entry)).toFixed(1);
-        sig.className = 'berg-signal fire';
-        sig.innerHTML = `${long ? '🟢' : '🔴'} ENTRY — EF→EG confirmed`
-          + `<div class="berg-trade">entry ${fmt(t.entry, 0)} · stop ${fmt(t.stop, 0)} · risk ${fmt(t.riskPts, 0)}pts<br>`
-          + `T1 ${fmt(t.t1, 0)} (${rr(t.t1)}R) · T2 ${fmt(t.t2, 0)} (${rr(t.t2)}R) · T3 ${fmt(t.t3, 0)} (${rr(t.t3)}R)</div>`;
-      } else {
+      if (b.signal) { sig.className = 'berg-signal fire'; sig.textContent = `${long ? '🟢' : '🔴'} ENTRY — EF→EG confirmed`; }
+      else {
         sig.className = 'berg-signal';
         sig.textContent = !s.h1Zone ? 'Waiting for an H1 zone'
           : !s.cmpInZone ? 'Waiting for price to enter the H1 zone'
@@ -2434,6 +2456,72 @@
           : 'EF seen — waiting for the M1 EG to confirm';
       }
     }
+
+    // Entry / SL / TP — always shown once price is in a zone (PLAN until it fires)
+    if (planEl) {
+      if (b.trade) {
+        const t = b.trade, rr = (x) => Math.abs((x - t.entry) / (t.stop - t.entry)).toFixed(1);
+        planEl.innerHTML = `<span class="pl-tag ${t.live ? 'live' : 'plan'}">${t.live ? 'LIVE TRIGGER' : 'PLAN (if it triggers)'}</span>
+          <div class="pl-rows">
+            <div class="pl-row"><span class="k">Entry</span><span class="v">${fmt(t.entry, 0)}</span></div>
+            <div class="pl-row sl"><span class="k">Stop loss</span><span class="v">${fmt(t.stop, 0)} <small>${fmt(t.riskPts, 0)}pts</small></span></div>
+            <div class="pl-row tp"><span class="k">TP1</span><span class="v">${fmt(t.t1, 0)} <small>${rr(t.t1)}R</small></span></div>
+            <div class="pl-row tp"><span class="k">TP2</span><span class="v">${fmt(t.t2, 0)} <small>${rr(t.t2)}R</small></span></div>
+            <div class="pl-row tp"><span class="k">TP3</span><span class="v">${fmt(t.t3, 0)} <small>${rr(t.t3)}R</small></span></div>
+          </div>`;
+        if (t.live && t.at) logBergSignal(b, dir);
+      } else {
+        planEl.innerHTML = '';
+      }
+    }
+    renderBergHistory();
+  }
+
+  // ===== BERG track history (persisted, outcome-tracked to TP1) =====
+  let bergHistory = [];
+  try { bergHistory = JSON.parse(localStorage.getItem('bergHistory') || '[]'); } catch (e) { bergHistory = []; }
+
+  function logBergSignal(b, dir) {
+    const t = b.trade;
+    const key = `${dir}-${t.at}`;
+    if (bergHistory.some(r => r.key === key)) return;   // dedupe by M1 trigger bar
+    bergHistory.push({ key, dir, ts: Date.now(), entry: t.entry, stop: t.stop, t1: t.t1, status: 'open' });
+    if (bergHistory.length > 50) bergHistory = bergHistory.slice(-50);
+    try { localStorage.setItem('bergHistory', JSON.stringify(bergHistory)); } catch (e) {}
+  }
+
+  function updateBergHistory() {
+    const px = state.gold && state.gold.price;
+    if (!px) return;
+    let changed = false;
+    bergHistory.forEach(r => {
+      if (r.status !== 'open') return;
+      const win = r.dir === 'buy' ? px >= r.t1 : px <= r.t1;
+      const loss = r.dir === 'buy' ? px <= r.stop : px >= r.stop;
+      if (win) { r.status = 'win'; r.exit = r.t1; r.closedTs = Date.now(); changed = true; }
+      else if (loss) { r.status = 'loss'; r.exit = r.stop; r.closedTs = Date.now(); changed = true; }
+    });
+    if (changed) { try { localStorage.setItem('bergHistory', JSON.stringify(bergHistory)); } catch (e) {} renderBergHistory(); }
+  }
+
+  function renderBergHistory() {
+    const el = document.getElementById('bergHistory');
+    if (!el) return;
+    const closed = bergHistory.filter(r => r.status !== 'open');
+    const wins = closed.filter(r => r.status === 'win').length;
+    const losses = closed.filter(r => r.status === 'loss').length;
+    const open = bergHistory.filter(r => r.status === 'open').length;
+    const hit = closed.length ? Math.round(100 * wins / closed.length) : 0;
+    if (!bergHistory.length) {
+      el.innerHTML = `<div class="h-title"><span>Track record</span></div><div class="h-empty">No BERG triggers logged yet.</div>`;
+      return;
+    }
+    const rows = bergHistory.slice(-5).reverse().map(r => {
+      const d = new Date(r.ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const res = r.status === 'win' ? '<span class="res-win">WIN</span>' : r.status === 'loss' ? '<span class="res-loss">LOSS</span>' : '<span class="res-open">OPEN</span>';
+      return `<div class="h-row"><span>${d} · ${r.dir === 'buy' ? 'L' : 'S'} @ ${fmt(r.entry, 0)}</span>${res}</div>`;
+    }).join('');
+    el.innerHTML = `<div class="h-title"><span>Track record (to TP1)</span><span><b>${wins}W ${losses}L</b>${closed.length ? ` · ${hit}%` : ''}${open ? ` · ${open} open` : ''}</span></div>${rows}`;
   }
 
   // Initialize when DOM is ready
