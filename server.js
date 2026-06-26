@@ -514,7 +514,8 @@ async function fetchBerg(side) {
         live, at: live ? egBar.t : null };
     }
   }
-  return { ok: true, side, price, zone,
+  const candles = m15.slice(-160).map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c }));
+  return { ok: true, side, price, zone, candles,
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
 }
 
