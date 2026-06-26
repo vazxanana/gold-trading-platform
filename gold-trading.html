@@ -19,30 +19,31 @@
     }
 
     :root {
-      --bg-primary: #F8F9FA;
-      --bg-secondary: #FFFFFF;
-      --bg-tertiary: #F1F3F5;
-      --text-primary: #1A1D29;
-      --text-secondary: #4A5568;
-      --text-tertiary: #7A8196;
-      --border: #E2E5EB;
-      --border-light: #EDF0F7;
-      --accent-green: #00A651;
-      --accent-red: #C23B33;
-      --accent-blue: #0052CC;
-      --accent-gold: #B8860B;
+      --bg-primary: #0A0D13;
+      --bg-secondary: #11151F;
+      --bg-tertiary: #1A2030;
+      --text-primary: #E8ECF4;
+      --text-secondary: #9AA4B8;
+      --text-tertiary: #5E6A80;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-light: rgba(255, 255, 255, 0.05);
+      --accent-green: #34D399;
+      --accent-red: #F87171;
+      --accent-blue: #5B9BFF;
+      --accent-gold: #D4AF37;
       --accent-amber: #E3A008;
-      --glass-light: rgba(255, 255, 255, 0.6);
-      --glass-lighter: rgba(255, 255, 255, 0.75);
-      --glass-ultra: rgba(255, 255, 255, 0.5);
-      --shadow-soft: 0 10px 30px rgba(26, 29, 41, 0.08);
-      --shadow-lift: 0 18px 56px rgba(26, 29, 41, 0.13);
+      --glass-light: rgba(255, 255, 255, 0.035);
+      --glass-lighter: rgba(255, 255, 255, 0.06);
+      --glass-ultra: rgba(255, 255, 255, 0.025);
+      --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.35);
+      --shadow-lift: 0 18px 56px rgba(0, 0, 0, 0.5);
     }
 
     html, body {
       background:
-        radial-gradient(circle at top left, rgba(227, 160, 8, 0.12), transparent 34rem),
-        linear-gradient(135deg, #F8F9FA 0%, #EFF3F7 100%);
+        radial-gradient(circle at 12% -5%, rgba(212, 175, 55, 0.10), transparent 38rem),
+        radial-gradient(circle at 90% 0%, rgba(91, 155, 255, 0.07), transparent 40rem),
+        linear-gradient(160deg, #0A0D13 0%, #0C1019 55%, #0A0D13 100%);
       background-attachment: fixed;
       color: var(--text-primary);
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -55,50 +56,50 @@
       line-height: 1.5;
     }
 
-    /* GLASS EFFECT - Ultra Transparent */
+    /* GLASS / CARD SURFACES — dark */
     .glass {
       background: var(--glass-light);
-      backdrop-filter: blur(24px) saturate(200%);
-      -webkit-backdrop-filter: blur(24px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border: 1px solid var(--border);
       border-radius: 12px;
-      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.04);
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .glass:hover {
       background: var(--glass-lighter);
-      border-color: rgba(255, 255, 255, 0.8);
-      box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      border-color: rgba(255, 255, 255, 0.14);
+      box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
 
     .glass-premium {
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0.55) 100%);
-      backdrop-filter: blur(30px) saturate(220%);
-      -webkit-backdrop-filter: blur(30px) saturate(220%);
-      border: 1.5px solid rgba(255, 255, 255, 0.85);
-      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      background: linear-gradient(150deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.02) 100%);
+      backdrop-filter: blur(24px) saturate(150%);
+      -webkit-backdrop-filter: blur(24px) saturate(150%);
+      border: 1px solid rgba(212, 175, 55, 0.18);
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
 
     .glass-ultra {
-      background: rgba(255, 255, 255, 0.45);
-      backdrop-filter: blur(40px) saturate(250%);
-      -webkit-backdrop-filter: blur(40px) saturate(250%);
-      border: 1px solid rgba(255, 255, 255, 0.75);
-      box-shadow: 0 8px 40px rgba(26, 29, 41, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      background: rgba(255, 255, 255, 0.025);
+      backdrop-filter: blur(30px) saturate(150%);
+      -webkit-backdrop-filter: blur(30px) saturate(150%);
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
 
-    /* HEADER - Glass */
+    /* HEADER */
     .header {
-      background: rgba(255, 255, 255, 0.5);
-      backdrop-filter: blur(20px) saturate(200%);
-      -webkit-backdrop-filter: blur(20px) saturate(200%);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+      background: rgba(10, 13, 19, 0.72);
+      backdrop-filter: blur(18px) saturate(160%);
+      -webkit-backdrop-filter: blur(18px) saturate(160%);
+      border-bottom: 1px solid var(--border);
       padding: 20px 40px;
       position: sticky;
       top: 0;
       z-index: 100;
-      box-shadow: 0 4px 20px rgba(26, 29, 41, 0.08);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
     }
 
     .header-inner {
@@ -1177,6 +1178,36 @@
       .cal-table tbody td:nth-child(3) { display: none; }
       .brief-title { font-size: 20px; }
     }
+
+    /* ===== DARK THEME — surface overrides ===== */
+    .chart-header { background: rgba(255,255,255,0.025); border-bottom: 1px solid var(--border); }
+    .chart-container, .tradingview-widget-container { background: var(--bg-secondary); }
+    .card { background: var(--glass-light); border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255,255,255,0.04); }
+    .card:hover { background: var(--glass-lighter); border-color: rgba(255,255,255,0.14); box-shadow: var(--shadow-lift); }
+    .ticker-item { background: rgba(255,255,255,0.035); border: 1px solid var(--border); }
+    .direction-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+    .direction-block:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); }
+    .direction-block.bullish { background: rgba(52,211,153,0.09); border-color: rgba(52,211,153,0.22); }
+    .direction-block.bearish { background: rgba(248,113,113,0.09); border-color: rgba(248,113,113,0.22); }
+    .price-level { background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+    .price-level:hover { background: rgba(52,211,153,0.10); border-color: rgba(255,255,255,0.14); }
+    .price-level.bullish { background: rgba(52,211,153,0.09); border-left-color: var(--accent-green); }
+    .price-level.bearish { background: rgba(248,113,113,0.09); border-left-color: var(--accent-red); }
+    .metric-box { background: rgba(255,255,255,0.028); border: 1px solid var(--border); }
+    .metric-box:hover { background: rgba(91,155,255,0.08); border-color: rgba(91,155,255,0.32); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+    .scenario { background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+    .scenario:hover { background: rgba(91,155,255,0.08); border-color: rgba(91,155,255,0.28); }
+    .scenario.bullish { background: rgba(52,211,153,0.09); border-left-color: var(--accent-green); }
+    .scenario.bearish { background: rgba(248,113,113,0.09); border-left-color: var(--accent-red); }
+    .badge { background: rgba(255,255,255,0.05); border: 1px solid var(--border); }
+    .footer { border-top: 1px solid var(--border); }
+    .opp-card { background: rgba(255,255,255,0.03); }
+    .source-note { color: var(--text-tertiary); }
+    /* calendar on dark */
+    .cal-table tbody tr:hover { background: rgba(212,175,55,0.07); }
+    .cal-upcoming td { background: rgba(91,155,255,0.06); }
+    .opp-dir.wait, .opp-dir.flat { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
   </style>
 </head>
 <body>
@@ -1709,17 +1740,19 @@
         symbol: "OANDA:XAUUSD",
         interval: "60",
         timezone: "exchange",
-        theme: "light",
+        theme: "dark",
         style: "1",
         locale: "en",
-        toolbar_bg: "rgba(248, 249, 250, 0.5)",
+        toolbar_bg: "#11151F",
         enable_publishing: false,
         allow_symbol_change: false,
         container_id: "tradingview_chart",
         studies: ["RSI@tv-basicstudies", "MACD@tv-basicstudies"],
         overrides: {
-          "paneProperties.background": "rgba(248, 249, 250, 0.3)",
-          "paneProperties.backgroundType": "solid"
+          "paneProperties.background": "#0C1019",
+          "paneProperties.backgroundType": "solid",
+          "paneProperties.vertGridProperties.color": "rgba(255,255,255,0.04)",
+          "paneProperties.horzGridProperties.color": "rgba(255,255,255,0.04)"
         },
         width: '100%',
         height: 500
@@ -1751,7 +1784,7 @@
         <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px;">
           Live Chart - XAU/USD
         </div>
-        <div style="width: min(460px, 100%); height: 150px; display: grid; align-items: end; grid-template-columns: repeat(18, 1fr); gap: 4px; padding: 14px; border-radius: 10px; background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.65);">
+        <div style="width: min(460px, 100%); height: 150px; display: grid; align-items: end; grid-template-columns: repeat(18, 1fr); gap: 4px; padding: 14px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border);">
           ${[44, 52, 49, 64, 58, 72, 69, 82, 76, 88, 81, 91, 86, 95, 90, 98, 93, 100].map((height, index) => `
             <span style="height:${height}%; border-radius: 4px 4px 0 0; background:${index % 5 === 0 ? 'rgba(194, 59, 51, 0.55)' : 'rgba(0, 166, 81, 0.58)'};"></span>
           `).join('')}
