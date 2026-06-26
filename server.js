@@ -10,7 +10,7 @@ const FEEDS = {
   gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
   dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
   vix: 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=1d&interval=1m',
-  tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=1`
+  tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=40`
 };
 
 function getJson(url) {
@@ -67,12 +67,26 @@ function parseYahooChart(payload, label) {
 
 function parseTips(payload) {
   const observations = (payload && payload.observations) || [];
-  const observation = observations.find((item) => item.value && item.value !== '.');
-  if (!observation) throw new Error('FRED DFII10 missing latest observation');
+  // valid points, newest-first (FRED sort_order=desc)
+  const pts = observations
+    .filter((o) => o.value && o.value !== '.')
+    .map((o) => ({ date: o.date, value: Number(o.value) }))
+    .filter((o) => Number.isFinite(o.value));
+  if (!pts.length) throw new Error('FRED DFII10 missing latest observation');
 
-  const value = Number(observation.value);
-  if (!Number.isFinite(value)) throw new Error('FRED DFII10 value invalid');
-  return { value, date: observation.date };
+  const value = pts[0].value;
+  const at = (n) => (pts[n] ? pts[n].value : null);
+  const d1 = at(1), d5 = at(5), d20 = at(20);
+  // chronological series (oldest-first) for a sparkline
+  const series = pts.slice(0, 30).reverse().map((p) => p.value);
+  return {
+    value, date: pts[0].date,
+    prev: d1,
+    change1d: d1 != null ? value - d1 : 0,
+    change1w: d5 != null ? value - d5 : 0,
+    change1m: d20 != null ? value - d20 : 0,
+    series
+  };
 }
 
 // --- Datacenter-friendly live fallbacks (Yahoo blocks datacenter IPs like Railway) ---

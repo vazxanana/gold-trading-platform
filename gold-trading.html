@@ -1084,6 +1084,33 @@
     .opp-rationale { margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
     .opp-rationale b { color: var(--text-primary); }
 
+    .tile-spark { margin-top: 10px; height: 30px; }
+    .tile-spark svg { width: 100%; height: 30px; display: block; }
+
+    /* ===== Institutional polish ===== */
+    .top-accent {
+      position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 3000;
+      background: linear-gradient(90deg, #8a6608 0%, #B8860B 25%, #E3A008 50%, #B8860B 75%, #8a6608 100%);
+    }
+    .header { border-bottom: 1px solid rgba(184,134,11,0.18); }
+    .section-title { position: relative; padding-left: 15px; }
+    .section-title::before {
+      content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+      width: 4px; height: 17px; border-radius: 2px;
+      background: linear-gradient(180deg, #E3A008, #B8860B);
+    }
+    /* Aligned, terminal-grade numerals everywhere it matters */
+    .ticker-value, .brief-number, .metric-value, .opp-lv .v, .mom-pips, .mom-pair,
+    .berg-plan .pl-row .v, .opp-conv b, .cal-table tbody td, .mom-px, .mom-countdown {
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+    }
+    .metric-box { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s ease; }
+    .metric-box:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); }
+    .opp-card { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s ease; }
+    .opp-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+    /* Refined header brand */
+    .brand-icon { box-shadow: 0 8px 22px rgba(184,134,11,0.28), inset 0 1px 0 rgba(255,255,255,0.25); }
+
     /* ===== Opps layout + BERG side ===== */
     .opps-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
     @media (max-width: 1100px) { .opps-layout { grid-template-columns: 1fr; } }
@@ -1154,6 +1181,7 @@
 </head>
 <body>
 
+<div class="top-accent"></div>
 <div class="alert-bar" id="alertBar"></div>
 
 <!-- HEADER -->
@@ -1257,6 +1285,7 @@
           <div class="metric-label">Real Yields (TIPS 10Y)</div>
           <div class="metric-value" id="tipsScore">—</div>
           <div class="metric-detail" id="tipsMetricDetail">Latest FRED DFII10 value pending</div>
+          <div class="tile-spark" id="tipsSpark"></div>
         </div>
         <div class="metric-box">
           <div class="metric-label">Central Bank Flows</div>
@@ -1822,7 +1851,12 @@
 
     if (state.tips) {
       setText('tipsYield', `${fmt(state.tips.value)}%`);
-      setText('tipsDate', `Real yield · FRED ${state.tips.date}`);
+      const ch = state.tips.change1d || 0;
+      // Falling real yields are BULLISH for gold → show falling in green
+      const cls = ch < 0 ? 'change-up' : ch > 0 ? 'change-down' : '';
+      const arrow = ch < 0 ? '↓' : ch > 0 ? '↑' : '→';
+      const el = $('tipsDate');
+      if (el) el.innerHTML = `<span class="${cls}">${arrow} ${fmt(Math.abs(ch), 3)} 1d</span> · real yield`;
     }
   }
 
@@ -1900,9 +1934,14 @@
 
     // 1. Real Yields (TIPS 10Y) — lower real yields lift gold
     if (state.tips) {
-      const v = state.tips.value;
-      const s = v <= 0.5 ? 10 : v <= 1.0 ? 9 : v <= 1.5 ? 7 : v <= 2.0 ? 5 : v <= 2.5 ? 3 : 2;
-      D.tips = { score: s, detail: `${fmt(v)}% real yield · FRED DFII10 ${state.tips.date}` };
+      const v = state.tips.value, w = state.tips.change1w || 0;
+      // Level: lower real yields = lower opportunity cost = bullish gold
+      const lvl = v <= 0.5 ? 9 : v <= 1.0 ? 8 : v <= 1.5 ? 6 : v <= 2.0 ? 5 : v <= 2.5 ? 4 : 3;
+      // Trend: FALLING real yields are the potent bullish signal
+      const trd = w <= -0.05 ? 2 : w < 0 ? 1 : w >= 0.05 ? -2 : w > 0 ? -1 : 0;
+      const s = Math.max(1, Math.min(10, lvl + trd));
+      const dir = w < -0.005 ? 'falling ▼' : w > 0.005 ? 'rising ▲' : 'flat';
+      D.tips = { score: s, detail: `${fmt(v)}% · ${signed(w, 3)} 1w (${dir})` };
     }
 
     // 2. USD Index correlation — a softer dollar supports gold
@@ -1936,6 +1975,7 @@
       if (el) { el.classList.toggle('text-green', !!d && d.score >= 7); el.classList.toggle('text-red', !!d && d.score <= 3); }
     };
     setTile('tipsScore', D.tips); setText('tipsMetricDetail', D.tips ? D.tips.detail : 'Latest FRED DFII10 value pending');
+    renderTipsSpark();
     setTile('dxyScore', D.dxy);   setText('dxyMetricDetail', D.dxy ? D.dxy.detail : 'Live DXY value pending');
     setTile('vixScore', D.vix);   setText('vixDetail', D.vix ? D.vix.detail : 'Live ^VIX level pending');
     setTile('geoScore', D.geo);   setText('geoDetail', D.geo ? D.geo.detail : 'Market-implied from VIX spike');
@@ -2310,6 +2350,21 @@
       alertedEventKey = key;
       showAlert(`⏱ ${evFlag(ev)} ${ev.Event} in ${Math.ceil(mins)} min — watch ${pairLabel(evPair(ev))}`, 'alert-event');
     }
+  }
+
+  // Real-yield sparkline (falling = bullish for gold → green)
+  function renderTipsSpark() {
+    const el = document.getElementById('tipsSpark');
+    if (!el) return;
+    const s = state.tips && state.tips.series;
+    if (!s || s.length < 3) { el.innerHTML = ''; return; }
+    const W = 200, H = 30, min = Math.min(...s), max = Math.max(...s), rng = (max - min) || 1;
+    const pts = s.map((v, i) => `${(i/(s.length-1)*W).toFixed(1)},${(H - ((v-min)/rng)*H*0.9 - H*0.05).toFixed(1)}`).join(' ');
+    const falling = s[s.length-1] <= s[0];
+    const col = falling ? 'var(--accent-green)' : 'var(--accent-red)';
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
   }
 
   // ===== Trade Opportunities engine =====
