@@ -426,7 +426,8 @@ async function fetchGoldLevels() {
   const bars = [];
   for (let i = 0; i < ts.length; i++) {
     const h = q.high[i], l = q.low[i], c = q.close[i];
-    if ([h, l, c].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+    // require a real range — skip degenerate/flat daily bars that collapse pivots
+    if ([h, l, c].every((v) => typeof v === 'number' && Number.isFinite(v)) && h > l) {
       bars.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), h, l, c });
     }
   }
@@ -550,8 +551,23 @@ async function fetchBerg(side) {
         live, at: live ? egBar.t : null };
     }
   }
-  const candles = m15.slice(-160).map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c }));
-  return { ok: true, side, price, zone, candles,
+  // Pack each timeframe: candles + EG/EF marker positions (for the square boxes)
+  const tfPack = (bars, fl, lastN) => {
+    const slice = bars.slice(-lastN);
+    const startIdx = bars.length - slice.length;
+    const markers = [];
+    for (let i = startIdx; i < bars.length; i++) {
+      if (fl.eg[i]) markers.push({ time: bars[i].t, kind: 'eg', high: bars[i].h, low: bars[i].l });
+      else if (fl.ef[i]) markers.push({ time: bars[i].t, kind: 'ef', high: bars[i].h, low: bars[i].l });
+    }
+    return { candles: slice.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })), markers };
+  };
+  const tfs = {
+    h1: tfPack(h1, H, 100),
+    m15: tfPack(m15, M, 150),
+    m1: tfPack(m1, m, 120)
+  };
+  return { ok: true, side, price, zone, tfs, candles: tfs.m15.candles,
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
 }
 

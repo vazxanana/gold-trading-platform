@@ -1087,6 +1087,25 @@
     .tile-spark { margin-top: 10px; height: 30px; }
     .tile-spark svg { width: 100%; height: 30px; display: block; }
 
+    /* ===== Multi-timeframe chart stack ===== */
+    .mtf-stack { display: flex; flex-direction: column; height: 470px; }
+    .mtf-pane { position: relative; flex: 1 1 0; min-height: 0; border-bottom: 1px solid var(--border); }
+    .mtf-pane:last-child { border-bottom: none; }
+    .mtf-tag {
+      position: absolute; top: 6px; left: 8px; z-index: 5;
+      font-size: 10px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-gold); background: rgba(10,13,19,0.7);
+      padding: 2px 8px; border-radius: 5px; letter-spacing: 0.6px; pointer-events: none;
+    }
+    .mtf-chart { width: 100%; height: 100%; }
+    .mtf-legend { font-size: 9.5px; font-weight: 400; color: var(--text-tertiary); letter-spacing: 0.3px; margin-left: 10px; }
+    .mtf-legend i { display: inline-block; vertical-align: middle; margin: 0 3px 0 8px; }
+    .mtf-legend .sq-eg { width: 8px; height: 8px; background: #34D399; border-radius: 2px; }
+    .mtf-legend .sq-ef { width: 8px; height: 8px; background: #E3A008; border-radius: 2px; }
+    .mtf-legend .ln-zone { width: 12px; height: 0; border-top: 2px dashed #D4AF37; }
+    .mtf-legend .ln-entry { width: 12px; height: 2px; background: #5B9BFF; }
+    @media (max-width: 1400px) { .mtf-stack { height: 520px; } }
+
     /* ===== Morning Macro Cockpit + Cross-Pair Board ===== */
     .cockpit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 1024px) { .cockpit-grid { grid-template-columns: 1fr; } }
@@ -1514,9 +1533,15 @@
 
     <!-- CHART -->
     <div>
-      <div class="chart-container glass-premium">
-        <div class="chart-header">XAU/USD Technical Analysis Chart</div>
-        <div class="tv-container" id="tradingview_chart"></div>
+      <div class="chart-container glass-premium" id="tradingview_chart">
+        <div class="chart-header">XAU/USD — H1 · M15 · M1
+          <span class="mtf-legend"><i class="sq-eg"></i>EG <i class="sq-ef"></i>EF <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
+        </div>
+        <div class="mtf-stack" id="mtfStack">
+          <div class="mtf-pane"><div class="mtf-tag">H1</div><div class="mtf-chart" id="tfH1"></div></div>
+          <div class="mtf-pane"><div class="mtf-tag">M15</div><div class="mtf-chart" id="tfM15"></div></div>
+          <div class="mtf-pane"><div class="mtf-tag">M1</div><div class="mtf-chart" id="tfM1"></div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1747,7 +1772,8 @@
   let currentLevels = null;   // resolved pivots/ATR for the opportunity engine
   let lastComposite = null;   // macro composite 0-100
   let lastZone = null;        // 'bull' | 'neutral' | 'bear'
-  let lwChart = null, candleSeries = null, bergLines = [], chartHasData = false;
+  const panes = {};   // { h1:{chart,series,lines}, m15:{...}, m1:{...} }
+  let chartHasData = false;
 
   const apiKeys = {
     fred: localStorage.getItem('fred_api_key') || '4d4ee6e804ae4c3cbe36e3678391f0ae',
@@ -1792,45 +1818,39 @@
     if (el) el.className = className;
   };
 
-  // Lightweight-charts candlestick chart with BERG overlays (zone / entry / SL / TP)
-  function initChart() {
-    const container = document.getElementById('tradingview_chart');
-    if (!container) return;
+  // Three synced lightweight-charts panes (H1 · M15 · M1) with BERG overlays + EG squares
+  function makePane(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const chart = LightweightCharts.createChart(el, {
+      layout: { background: { type: 'solid', color: '#0C1019' }, textColor: '#7A8196', fontFamily: "'JetBrains Mono', monospace", fontSize: 9 },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.08)' },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      autoSize: true
+    });
+    const series = chart.addCandlestickSeries({
+      upColor: '#34D399', downColor: '#F87171',
+      borderUpColor: '#34D399', borderDownColor: '#F87171',
+      wickUpColor: 'rgba(52,211,153,0.6)', wickDownColor: 'rgba(248,113,113,0.6)'
+    });
+    return { chart, series, lines: [] };
+  }
 
+  function initChart() {
     if (typeof LightweightCharts === 'undefined') {
       if (chartAttempts < maxChartAttempts) { chartAttempts++; setTimeout(initChart, 400); }
       else { console.warn('lightweight-charts unavailable, using fallback'); createFallbackChart(); }
       return;
     }
-
     try {
-      container.innerHTML = '';
-      container.classList.add('chart-ready');
-
-      // legend overlay
-      const legend = document.createElement('div');
-      legend.className = 'berg-chart-legend';
-      legend.innerHTML = `<span><i style="background:#D4AF37"></i>H1 zone</span>`
-        + `<span><i style="background:#5B9BFF"></i>Entry</span>`
-        + `<span><i style="background:#F87171"></i>SL</span>`
-        + `<span><i style="background:#34D399"></i>TP1/2/3</span>`;
-      container.appendChild(legend);
-
-      lwChart = LightweightCharts.createChart(container, {
-        layout: { background: { type: 'solid', color: '#0C1019' }, textColor: '#9AA4B8', fontFamily: "'JetBrains Mono', monospace", fontSize: 11 },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
-        timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.10)' },
-        rightPriceScale: { borderColor: 'rgba(255,255,255,0.10)' },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        autoSize: true
-      });
-      candleSeries = lwChart.addCandlestickSeries({
-        upColor: '#34D399', downColor: '#F87171',
-        borderUpColor: '#34D399', borderDownColor: '#F87171',
-        wickUpColor: 'rgba(52,211,153,0.7)', wickDownColor: 'rgba(248,113,113,0.7)'
-      });
-      console.log('Lightweight chart initialized');
-      loadBerg();   // populate candles + BERG overlays
+      panes.h1 = makePane('tfH1');
+      panes.m15 = makePane('tfM15');
+      panes.m1 = makePane('tfM1');
+      if (!panes.h1 || !panes.m15 || !panes.m1) throw new Error('panes missing');
+      console.log('MTF charts initialized (H1/M15/M1)');
+      loadBerg();
     } catch (e) {
       console.error('Chart error:', e);
       createFallbackChart();
@@ -1838,28 +1858,44 @@
   }
 
   function renderBergChart(b) {
-    if (!candleSeries || !b || !b.ok || !Array.isArray(b.candles) || b.candles.length < 5) return;
-    candleSeries.setData(b.candles);
-    bergLines.forEach((l) => { try { candleSeries.removePriceLine(l); } catch (e) {} });
-    bergLines = [];
-    const line = (price, color, title, dashed) => {
-      if (!Number.isFinite(price)) return;
-      bergLines.push(candleSeries.createPriceLine({
-        price, color, lineWidth: dashed ? 1 : 2,
-        lineStyle: dashed ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
-        axisLabelVisible: true, title
+    if (!panes.m15 || !b || !b.ok || !b.tfs) return;
+    const side = b.side || 'sell';
+    ['h1', 'm15', 'm1'].forEach((tf) => {
+      const pane = panes[tf], d = b.tfs[tf];
+      if (!pane || !d || !Array.isArray(d.candles) || d.candles.length < 3) return;
+      pane.series.setData(d.candles);
+
+      // EG = square box (coloured by setup side); EF = amber square
+      const markers = (d.markers || []).map((x) => ({
+        time: x.time,
+        position: side === 'sell' ? 'aboveBar' : 'belowBar',
+        color: x.kind === 'eg' ? (side === 'sell' ? '#F87171' : '#34D399') : 'rgba(227,160,8,0.95)',
+        shape: 'square',
+        size: x.kind === 'eg' ? 2 : 1
       }));
-    };
-    if (b.zone) { line(b.zone.top, '#D4AF37', 'H1 Zone ▲', true); line(b.zone.bot, '#D4AF37', 'H1 Zone ▼', true); }
-    if (b.trade) {
-      const t = b.trade, tag = t.live ? '' : ' (plan)';
-      line(t.entry, '#5B9BFF', 'Entry' + tag, false);
-      line(t.stop, '#F87171', 'SL', false);
-      line(t.t1, '#34D399', 'TP1', false);
-      line(t.t2, '#34D399', 'TP2', false);
-      line(t.t3, '#34D399', 'TP3', false);
+      pane.series.setMarkers(markers);
+
+      pane.lines.forEach((l) => { try { pane.series.removePriceLine(l); } catch (e) {} });
+      pane.lines = [];
+      const line = (price, color, title, dashed) => {
+        if (!Number.isFinite(price)) return;
+        pane.lines.push(pane.series.createPriceLine({
+          price, color, lineWidth: dashed ? 1 : 2,
+          lineStyle: dashed ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true, title
+        }));
+      };
+      if (b.zone) { line(b.zone.top, '#D4AF37', 'Zone▲', true); line(b.zone.bot, '#D4AF37', 'Zone▼', true); }
+      if (b.trade) {
+        const t = b.trade;
+        line(t.entry, '#5B9BFF', 'Entry'); line(t.stop, '#F87171', 'SL');
+        line(t.t1, '#34D399', 'TP1'); line(t.t2, '#34D399', 'TP2'); line(t.t3, '#34D399', 'TP3');
+      }
+    });
+    if (!chartHasData) {
+      ['h1', 'm15', 'm1'].forEach((tf) => panes[tf] && panes[tf].chart.timeScale().fitContent());
+      chartHasData = true;
     }
-    if (!chartHasData) { lwChart.timeScale().fitContent(); chartHasData = true; }
   }
 
   function createFallbackChart() {
