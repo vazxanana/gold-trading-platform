@@ -10,8 +10,19 @@ const FEEDS = {
   gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
   dxy: 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=1d&interval=1m',
   vix: 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=1d&interval=1m',
-  tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=40`
+  tips: `https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=40`,
+  // Macro Cockpit thresholds (FRED — reliable from datacenters)
+  curve: `https://api.stlouisfed.org/fred/series/observations?series_id=T10Y2Y&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=2`,
+  sahm: `https://api.stlouisfed.org/fred/series/observations?series_id=SAHMCURRENT&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=2`,
+  breakeven: `https://api.stlouisfed.org/fred/series/observations?series_id=T10YIE&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=2`
 };
+
+function parseFredLatest(payload) {
+  const o = ((payload && payload.observations) || []).find((x) => x.value && x.value !== '.');
+  if (!o) return null;
+  const v = Number(o.value);
+  return Number.isFinite(v) ? { value: v, date: o.date } : null;
+}
 
 function getJson(url) {
   return new Promise((resolve, reject) => {
@@ -201,6 +212,23 @@ async function fetchFxFallback() {
   };
 }
 
+// Cross-pair board: all 7 USD majors from one frankfurter call (daily change, datacenter-reliable).
+async function fetchMajors() {
+  const end = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
+  const j = await getJson(`https://api.frankfurter.dev/v1/${start}..${end}?base=USD&symbols=EUR,GBP,JPY,AUD,NZD,CAD,CHF`);
+  if (!j || !j.rates) throw new Error('frankfurter majors missing rates');
+  const dates = Object.keys(j.rates).sort();
+  const last = j.rates[dates[dates.length - 1]];
+  const prev = j.rates[dates[dates.length - 2]] || last;
+  const inv = (c) => fxEntry(1 / last[c], 1 / prev[c]);
+  const dir = (c) => fxEntry(last[c], prev[c]);
+  return {
+    EURUSD: inv('EUR'), GBPUSD: inv('GBP'), AUDUSD: inv('AUD'), NZDUSD: inv('NZD'),
+    USDJPY: dir('JPY'), USDCAD: dir('CAD'), USDCHF: dir('CHF')
+  };
+}
+
 // All majors for the country-aware pip tracker.
 // invert=true means pair = 1/(USD->ccy) e.g. EURUSD; false means pair = USD->ccy e.g. USDJPY.
 const PAIRS = {
@@ -237,14 +265,17 @@ async function fetchSinglePair(pair) {
 
 async function marketSnapshot() {
   const errors = [];
-  const [gold, dxy, vix, tips, eur, gbp, jpy] = await Promise.allSettled([
+  const [gold, dxy, vix, tips, eur, gbp, jpy, curve, sahm, brk] = await Promise.allSettled([
     getJson(FEEDS.gold).then((payload) => parseYahooChart(payload, 'GC=F')),
     getJson(FEEDS.dxy).then((payload) => parseYahooChart(payload, 'DXY')),
     getJson(FEEDS.vix).then((payload) => parseYahooChart(payload, 'VIX')),
     getJson(FEEDS.tips).then(parseTips),
     getJson(FX_YAHOO.EURUSD).then((p) => parseYahooChart(p, 'EURUSD')),
     getJson(FX_YAHOO.GBPUSD).then((p) => parseYahooChart(p, 'GBPUSD')),
-    getJson(FX_YAHOO.USDJPY).then((p) => parseYahooChart(p, 'USDJPY'))
+    getJson(FX_YAHOO.USDJPY).then((p) => parseYahooChart(p, 'USDJPY')),
+    getJson(FEEDS.curve).then(parseFredLatest),
+    getJson(FEEDS.sahm).then(parseFredLatest),
+    getJson(FEEDS.breakeven).then(parseFredLatest)
   ]);
 
   const data = {
@@ -262,8 +293,13 @@ async function marketSnapshot() {
     vix: null,
     tips: null,
     fx: {},
+    macro: {},
     errors
   };
+
+  data.macro.yieldCurve = curve.status === 'fulfilled' ? curve.value : null;   // T10Y2Y (neg = inverted)
+  data.macro.sahm = sahm.status === 'fulfilled' ? sahm.value : null;           // SAHMCURRENT
+  data.macro.breakeven = brk.status === 'fulfilled' ? brk.value : null;        // T10YIE (10Y inflation expectations)
 
   if (gold.status === 'fulfilled') {
     data.gold = gold.value;
@@ -724,6 +760,19 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(502, { 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ok: false, pair, error: error.message }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/majors') {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const pairs = await fetchMajors();
+      res.writeHead(200, { 'Cache-Control': 'max-age=60' });
+      res.end(JSON.stringify({ ok: true, pairs, fetchedAt: new Date().toISOString() }));
+    } catch (error) {
+      res.writeHead(502, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: error.message }));
     }
     return;
   }

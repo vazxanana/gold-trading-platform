@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="build-version" content="2.1.0-calendar">
-  <title>Gold Trading Platform - Institutional</title>
+  <title>Meridian Gold Desk — Macro Cockpit</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1087,6 +1087,41 @@
     .tile-spark { margin-top: 10px; height: 30px; }
     .tile-spark svg { width: 100%; height: 30px; display: block; }
 
+    /* ===== Morning Macro Cockpit + Cross-Pair Board ===== */
+    .cockpit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 1024px) { .cockpit-grid { grid-template-columns: 1fr; } }
+    .cockpit-card { padding: 18px 20px; }
+    .cockpit-head { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-primary); display: flex; justify-content: space-between; margin-bottom: 12px; }
+    .cockpit-head span { font-family: 'JetBrains Mono', monospace; color: var(--text-secondary); font-size: 12px; }
+    .cockpit-note { margin-top: 11px; font-size: 10.5px; color: var(--text-tertiary); }
+    .thr-row, .filt-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-light); font-size: 12px; }
+    .thr-row:last-child, .filt-row:last-child { border-bottom: none; }
+    .thr-name, .f-name { color: var(--text-secondary); }
+    .thr-name small, .f-name small { color: var(--text-tertiary); display: block; font-size: 10px; }
+    .thr-right { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+    .thr-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-primary); }
+    .thr-pill { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 5px; }
+    .thr-bull { background: rgba(52,211,153,0.14); color: var(--accent-green); }
+    .thr-bear { background: rgba(248,113,113,0.14); color: var(--accent-red); }
+    .thr-warn { background: rgba(227,160,8,0.16); color: var(--accent-amber); }
+    .thr-ref { background: rgba(255,255,255,0.06); color: var(--text-tertiary); }
+    .filt-row .f-mark { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+    .f-pass { background: #34D399; color: #06231a; }
+    .f-fail { background: rgba(248,113,113,0.18); color: #f87171; border: 1px solid rgba(248,113,113,0.4); }
+    .f-manual { background: rgba(255,255,255,0.06); color: var(--text-tertiary); border: 1px solid var(--border); }
+
+    .majors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 14px; }
+    .pair-card { padding: 15px 17px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); position: relative; overflow: hidden; transition: transform .25s cubic-bezier(.4,0,.2,1), border-color .25s; }
+    .pair-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.14); }
+    .pair-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+    .pair-up::before { background: var(--accent-green); } .pair-down::before { background: var(--accent-red); }
+    .pair-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .pair-sym { font-size: 14px; font-weight: 800; letter-spacing: 0.3px; color: var(--text-primary); }
+    .pair-px { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-tertiary); }
+    .pair-chg { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; margin-top: 5px; }
+    .pair-driver { margin-top: 9px; font-size: 10.5px; line-height: 1.5; color: var(--text-tertiary); }
+    .pair-driver b { color: var(--text-secondary); }
+
     /* ===== Institutional polish ===== */
     .top-accent {
       position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 3000;
@@ -1223,10 +1258,17 @@
 <div class="header">
   <div class="header-inner">
     <div class="brand-mark">
-      <div class="brand-icon">Au</div>
+      <div class="brand-icon">
+        <svg width="27" height="27" viewBox="0 0 27 27" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="13.5" cy="13.5" r="10" stroke="#FFF1C9" stroke-width="1.6"/>
+          <ellipse cx="13.5" cy="13.5" rx="4" ry="10" stroke="#FFF1C9" stroke-width="1.3"/>
+          <line x1="3.5" y1="13.5" x2="23.5" y2="13.5" stroke="#FFF1C9" stroke-width="1.3"/>
+          <line x1="13.5" y1="3.5" x2="13.5" y2="23.5" stroke="#FFF1C9" stroke-width="1" opacity="0.5"/>
+        </svg>
+      </div>
       <div>
-        <div class="logo">GOLD TRADING PLATFORM</div>
-        <div class="logo-sub">Institutional Grade Analytics</div>
+        <div class="logo">MERIDIAN GOLD DESK</div>
+        <div class="logo-sub">Macro Cockpit &amp; Execution Desk</div>
       </div>
     </div>
     <div class="price-ticker">
@@ -1304,6 +1346,36 @@
         <div class="berg-plan" id="bergTrade"></div>
         <div class="berg-hist" id="bergHistory"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- MORNING MACRO COCKPIT -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Morning Macro Cockpit</div>
+      <div class="section-sub">7 thresholds &amp; the 7-point trade filter · from your Macro Cockpit reference</div>
+    </div>
+    <div class="cockpit-grid">
+      <div class="card glass cockpit-card">
+        <div class="cockpit-head">The 7 Thresholds <span id="thrLive">—</span></div>
+        <div id="thresholds"></div>
+      </div>
+      <div class="card glass cockpit-card">
+        <div class="cockpit-head">7-Point Trade Filter <span id="filterScore">—</span></div>
+        <div id="tradeFilter"></div>
+        <div class="cockpit-note">All must pass — one fail = pass on the trade.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CROSS-PAIR MACRO BOARD -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Cross-Pair Macro Board</div>
+      <div class="section-sub">Other majors · live day move + the fundamental driver that sets each currency's bias</div>
+    </div>
+    <div id="majorsGrid" class="majors-grid">
+      <div class="opp-empty">Loading cross-pair board…</div>
     </div>
   </div>
 
@@ -1665,7 +1737,7 @@
 
 <!-- FOOTER -->
 <div class="footer">
-  Institutional-Grade Gold Trading Platform • Live Feeds Rechecked Every 30 Seconds • Last Updated: <span id="footerTime">—</span>
+  Meridian Gold Desk • Macro Cockpit & Execution • Live Feeds Rechecked Every 30 Seconds • Last Updated: <span id="footerTime">—</span>
 </div>
 
 <script>
@@ -1697,6 +1769,7 @@
     vix: null,
     fx: null,
     levels: null,
+    macro: null,
     errors: []
   };
 
@@ -1891,6 +1964,7 @@
     state.tips = snapshot.tips || null;
     state.vix = snapshot.vix || null;
     state.fx = snapshot.fx || null;
+    state.macro = snapshot.macro || null;
     state.errors = snapshot.errors || [];
   }
 
@@ -2039,9 +2113,12 @@
     setTile('geoScore', D.geo);   setText('geoDetail', D.geo ? D.geo.detail : 'Market-implied from VIX spike');
     setTile('cbScore', D.cb);     setText('cbDetail', D.cb.detail);
 
-    // Composite = average of available drivers, scaled to 100
+    // Composite = PDF-weighted (real yields dominate 60-70%, USD & CB next)
     const present = Object.values(D);
-    const composite = present.length ? Math.round((present.reduce((a, d) => a + d.score, 0) / present.length) * 10) : 0;
+    const W = { tips: 0.32, dxy: 0.24, cb: 0.20, vix: 0.12, geo: 0.12 };
+    let wsum = 0, acc = 0;
+    for (const k of Object.keys(D)) { acc += D[k].score * (W[k] || 0.1); wsum += (W[k] || 0.1); }
+    const composite = wsum ? Math.round((acc / wsum) * 10) : 0;
     const liveFeeds = [state.gold, state.dxy, state.tips, state.vix].filter(Boolean).length;
     const scoreText = present.length ? `${composite}%` : '—';
     const bias = composite >= 65 ? 'Bullish bias' : composite >= 45 ? 'Neutral / wait' : 'Bearish caution';
@@ -2070,6 +2147,8 @@
     lastComposite = present.length ? composite : null;
     lastZone = present.length ? zone : null;
     generateOpportunities();
+    renderThresholds();
+    renderTradeFilter();
     const gauge = $('biasGauge');
     if (gauge) {
       gauge.style.width = present.length ? `${composite}%` : '0%';
@@ -2425,6 +2504,136 @@
     </svg>`;
   }
 
+  // ===== Morning Macro Cockpit — the 7 thresholds (from the PDF) =====
+  function thrRow(name, sub, val, pillTxt, pillCls) {
+    return `<div class="thr-row"><div class="thr-name">${name}<small>${sub}</small></div>
+      <div class="thr-right"><span class="thr-val">${val}</span><span class="thr-pill ${pillCls}">${pillTxt}</span></div></div>`;
+  }
+  function renderThresholds() {
+    const el = document.getElementById('thresholds');
+    if (!el) return;
+    const m = state.macro || {};
+    const rows = [];
+    let live = 0;
+    // 1. 10Y real yield (TIPS) — 60-70% of gold moves
+    if (state.tips) { live++;
+      const v = state.tips.value;
+      const [p, c] = v < 0 ? ['Bullish gold', 'thr-bull'] : v > 1.75 ? ['Headwind', 'thr-bear'] : ['Neutral', 'thr-warn'];
+      rows.push(thrRow('10Y Real Yield', 'neg = bullish · >1.5–2% = headwind', `${fmt(v)}%`, p, c));
+    }
+    // 2. VIX regime
+    if (state.vix) { live++;
+      const x = state.vix.price;
+      const [p, c] = x > 25 ? ['Risk-off', 'thr-bull'] : x < 15 ? ['Risk-on', 'thr-bear'] : ['Caution', 'thr-warn'];
+      rows.push(thrRow('VIX', '<15 risk-on · 15–25 caution · >25 risk-off', fmt(x), p, c));
+    }
+    // 3. 2Y/10Y curve
+    if (m.yieldCurve) { live++;
+      const v = m.yieldCurve.value;
+      const [p, c] = v < 0 ? ['Inverted', 'thr-warn'] : ['Normal', 'thr-ref'];
+      rows.push(thrRow('2Y/10Y Curve', 'sustained inversion → recession odds', `${signed(v, 2)}`, p, c));
+    }
+    // 4. Sahm rule
+    if (m.sahm) { live++;
+      const v = m.sahm.value;
+      const [p, c] = v >= 0.5 ? ['Triggered', 'thr-bear'] : ['No signal', 'thr-ref'];
+      rows.push(thrRow('Sahm Rule', '+0.5pp above 12mo low = recession', fmt(v), p, c));
+    }
+    // 5. 10Y breakeven (inflation expectations)
+    if (m.breakeven) { live++;
+      rows.push(thrRow('10Y Breakeven', 'inflation expectations · transmits via real yields', `${fmt(m.breakeven.value)}%`, 'Context', 'thr-ref'));
+    }
+    // 6-7. Reference thresholds (no free live feed)
+    rows.push(thrRow('ISM Mfg', '<50 for 3+ months = recession precursor', '—', 'Reference', 'thr-ref'));
+    rows.push(thrRow('Wage growth (AHE)', '<3.5% cooling · >4% wage-price spiral', '—', 'Reference', 'thr-ref'));
+
+    el.innerHTML = rows.join('');
+    setText('thrLive', `${live} live`);
+  }
+
+  // ===== 7-Point Trade Filter (from the PDF) =====
+  function filtRow(name, sub, state3) {
+    const mark = state3 === 'pass' ? '✓' : state3 === 'fail' ? '✗' : '—';
+    return `<div class="filt-row"><div class="thr-right"><span class="f-mark f-${state3}">${mark}</span></div>
+      <div class="f-name" style="flex:1">${name}<small>${sub}</small></div></div>`;
+  }
+  function renderTradeFilter() {
+    const el = document.getElementById('tradeFilter');
+    if (!el) return;
+    const price = state.gold && state.gold.price;
+    const L = currentLevels;
+    const hr = new Date().getUTCHours();
+    const newsMins = activeEvent ? (new Date(activeEvent.DateTime).getTime() - Date.now()) / 60000 : Infinity;
+
+    // 1. Macro bias confirmed (clear, non-neutral composite)
+    const f1 = (lastZone && lastZone !== 'neutral') ? 'pass' : 'fail';
+    // 2. Price AT a key level (within 0.35*ATR of any pivot)
+    let f2 = 'fail';
+    if (price && L) {
+      const tol = 0.35 * (L.atr || price * 0.004);
+      const levels = [L.support1, L.support2, L.support3, L.resistance1, L.resistance2, L.resistance3, L.pivot].filter(Number.isFinite);
+      if (levels.some((lv) => Math.abs(price - lv) <= tol)) f2 = 'pass';
+    }
+    // 3. Double top/bottom — chart-confirmed (manual)
+    const f3 = 'manual';
+    // 4. No high-impact event in next 4h
+    const f4 = (newsMins > 240) ? 'pass' : 'fail';
+    // 5. London or London–NY session (07–16 UTC; best 12–16)
+    const f5 = (hr >= 7 && hr < 16) ? 'pass' : 'fail';
+    // 6. R:R ≥ 1:1.5 to measured move (setups are built ≥1.5R when a bias exists)
+    const f6 = (lastZone && lastZone !== 'neutral') ? 'pass' : 'fail';
+    // 7. Technical matches macro — chart-confirmed (manual)
+    const f7 = 'manual';
+
+    const rows = [
+      filtRow('Macro bias confirmed', 'composite shows a clear directional bias', f1),
+      filtRow('Price AT a key level', 'within ~0.35× ATR of a pivot — not mid-range', f2),
+      filtRow('Double top / bottom at level', 'confirm on the chart', f3),
+      filtRow('No high-impact event ≤ 4h', activeEvent ? `next: ${activeEvent.Event} in ${newsMins > 240 ? '>4h' : Math.ceil(newsMins) + 'm'}` : 'calendar clear', f4),
+      filtRow('London / London–NY session', `now ${String(hr).padStart(2,'0')}:00 UTC`, f5),
+      filtRow('R:R ≥ 1:1.5', 'to the measured-move target', f6),
+      filtRow('Technical matches macro', 'confirm direction on the chart', f7)
+    ];
+    el.innerHTML = rows.join('');
+    const autoPass = [f1, f2, f4, f5, f6].filter((x) => x === 'pass').length;
+    setText('filterScore', `${autoPass}/5 auto · 2 chart`);
+  }
+
+  // ===== Cross-Pair Macro Board (drivers from the PDF) =====
+  const PAIR_DRIVER = {
+    EURUSD: 'EUR is <b>57.6% of DXY</b> — ECB–Fed policy divergence is the driver.',
+    GBPUSD: '<b>BOE</b>: 2% CPI mandate; watch MPC vote splits for direction.',
+    USDJPY: '<b>JPY</b> = global carry-funding currency & risk-off magnet; small BOJ hikes → outsized unwinds.',
+    AUDUSD: '<b>China PMI &gt;52</b> = structurally AUD-positive regardless of RBA.',
+    USDCAD: '<b>CAD</b> tracks WTI (&gt;$80 = support) + ~75% exports to US; follows Fed with a lag.',
+    NZDUSD: '<b>RBNZ</b> = most transparent forward guidance; NZD trades ~ AUD.',
+    USDCHF: '<b>CHF</b> = premier safe haven (with JPY); SNB manages appreciation.'
+  };
+  async function loadMajors() {
+    const grid = document.getElementById('majorsGrid');
+    if (!grid) return;
+    try {
+      const res = await fetch(`${apiBase}/api/majors`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!data.ok || !data.pairs) throw new Error('no majors');
+      const order = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD', 'USDCHF'];
+      grid.innerHTML = order.map((sym) => {
+        const p = data.pairs[sym]; if (!p) return '';
+        const up = (p.changePct || 0) >= 0;
+        const factor = sym === 'USDJPY' ? 100 : 10000;
+        const pips = (p.change || 0) * factor;
+        const dec = sym === 'USDJPY' ? 3 : 5;
+        return `<div class="pair-card ${up ? 'pair-up' : 'pair-down'}">
+          <div class="pair-top"><span class="pair-sym">${sym.slice(0,3)}/${sym.slice(3)}</span><span class="pair-px">${Number(p.price).toFixed(dec)}</span></div>
+          <div class="pair-chg" style="color:${up ? 'var(--accent-green)' : 'var(--accent-red)'}">${up ? '▲' : '▼'} ${signed(p.changePct, 2)}% · ${pips >= 0 ? '+' : ''}${pips.toFixed(0)} pips</div>
+          <div class="pair-driver">${PAIR_DRIVER[sym] || ''}</div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      grid.innerHTML = '<div class="opp-empty">Cross-pair feed offline.</div>';
+    }
+  }
+
   // ===== Trade Opportunities engine =====
   function oppCard(o) {
     const lv = (k, v, sub) => `<div class="opp-lv"><span class="k">${k}</span><span class="v">${v}${sub ? ` <small>${sub}</small>` : ''}</span></div>`;
@@ -2661,6 +2870,10 @@
     // Refresh pivot/ATR levels every 5 minutes
     const levelsInterval = setInterval(loadLevels, 300000);
 
+    // Cross-pair macro board (frankfurter — light) every 2 minutes
+    loadMajors();
+    const majorsInterval = setInterval(loadMajors, 120000);
+
     // BERG live SOP side panel (3 intraday Yahoo calls) — every 60s
     setTimeout(loadBerg, 2500);
     const bergInterval = setInterval(loadBerg, 60000);
@@ -2687,6 +2900,7 @@
       clearInterval(countdownInterval);
       clearInterval(calendarInterval);
       clearInterval(levelsInterval);
+      clearInterval(majorsInterval);
       clearInterval(bergInterval);
     });
 
