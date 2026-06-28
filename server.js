@@ -599,12 +599,12 @@ function egef(bars, side) {
 
 async function fetchBerg(side) {
   const settled = await Promise.allSettled([
-    fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d')
+    fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d'),
+    fetchBars('1wk', '2y'), fetchBars('1d', '1y')
   ]);
-  const h1 = settled[0].status === 'fulfilled' ? settled[0].value : null;
-  const m15 = settled[1].status === 'fulfilled' ? settled[1].value : null;
-  const m1 = settled[2].status === 'fulfilled' ? settled[2].value : null;
-  if (!h1 && !m15 && !m1) throw new Error('intraday feed offline (all timeframes)');
+  const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : null;
+  const h1 = val(0), m15 = val(1), m1 = val(2), w1 = val(3), d1 = val(4);
+  if (!h1 && !m15 && !m1 && !w1 && !d1) throw new Error('feed offline (all timeframes)');
   const last = (a) => (a && a.length ? a[a.length - 1].c : null);
   const price = last(m1) != null ? last(m1) : (last(m15) != null ? last(m15) : last(h1));
 
@@ -664,7 +664,9 @@ async function fetchBerg(side) {
     return { candles: slice.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })), markers };
   };
   const tfs = {};
-  if (h1) tfs.h1 = tfPack(h1, H, 100);
+  if (w1) tfs.w1 = tfPack(w1, egef(w1, side), 90);
+  if (d1) tfs.d1 = tfPack(d1, egef(d1, side), 130);
+  if (h1) tfs.h1 = tfPack(h1, H, 120);
   if (m15) tfs.m15 = tfPack(m15, M, 150);
   if (m1) tfs.m1 = tfPack(m1, mflags, 120);
   return { ok: true, side, price, zone, tfs,

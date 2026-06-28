@@ -1534,13 +1534,13 @@
   <!-- MULTI-TIMEFRAME CHART (full width, side by side, synced) -->
   <div class="section">
     <div class="chart-container glass-premium" id="tradingview_chart">
-      <div class="chart-header">XAU/USD — H1 · M15 · M1 · synced
+      <div class="chart-header">XAU/USD — Weekly · Daily · H1 · synced
         <span class="mtf-legend"><i class="sq-eg"></i>EG <i class="sq-ef"></i>EF <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
       </div>
       <div class="mtf-row" id="mtfStack">
+        <div class="mtf-pane"><div class="mtf-tag">WEEKLY</div><div class="mtf-chart" id="tfW1"></div><div class="mtf-msg" id="msgW1"></div></div>
+        <div class="mtf-pane"><div class="mtf-tag">DAILY</div><div class="mtf-chart" id="tfD1"></div><div class="mtf-msg" id="msgD1"></div></div>
         <div class="mtf-pane"><div class="mtf-tag">H1</div><div class="mtf-chart" id="tfH1"></div><div class="mtf-msg" id="msgH1"></div></div>
-        <div class="mtf-pane"><div class="mtf-tag">M15</div><div class="mtf-chart" id="tfM15"></div><div class="mtf-msg" id="msgM15"></div></div>
-        <div class="mtf-pane"><div class="mtf-tag">M1</div><div class="mtf-chart" id="tfM1"></div><div class="mtf-msg" id="msgM1"></div></div>
       </div>
     </div>
   </div>
@@ -1907,7 +1907,7 @@
 
   // Sync the crosshair across the three panes (hover one → line up the others by time)
   function setupChartSync() {
-    const arr = [panes.h1, panes.m15, panes.m1].filter(Boolean);
+    const arr = [panes.w1, panes.d1, panes.h1].filter(Boolean);
     let syncing = false;
     arr.forEach((src) => {
       src.chart.subscribeCrosshairMove((param) => {
@@ -1935,10 +1935,10 @@
       return;
     }
     try {
+      panes.w1 = makePane('tfW1');
+      panes.d1 = makePane('tfD1');
       panes.h1 = makePane('tfH1');
-      panes.m15 = makePane('tfM15');
-      panes.m1 = makePane('tfM1');
-      if (!panes.h1 || !panes.m15 || !panes.m1) throw new Error('panes missing');
+      if (!panes.w1 || !panes.d1 || !panes.h1) throw new Error('panes missing');
       setupChartSync();
       console.log('MTF charts initialized (H1/M15/M1)');
       loadBerg();
@@ -1949,10 +1949,10 @@
   }
 
   function renderBergChart(b) {
-    if (!panes.m15) return;
+    if (!panes.h1) return;
     const side = (b && b.side) || 'sell';
     const offline = !b || !b.ok || !b.tfs;
-    ['h1', 'm15', 'm1'].forEach((tf) => {
+    ['w1', 'd1', 'h1'].forEach((tf) => {
       const pane = panes[tf], d = !offline && b.tfs[tf];
       const hasData = d && Array.isArray(d.candles) && d.candles.length >= 3;
       const msg = document.getElementById('msg' + tf.toUpperCase());
@@ -1991,7 +1991,7 @@
       }
     });
     if (!chartHasData) {
-      ['h1', 'm15', 'm1'].forEach((tf) => panes[tf] && panes[tf].chart.timeScale().fitContent());
+      ['w1', 'd1', 'h1'].forEach((tf) => panes[tf] && panes[tf].chart.timeScale().fitContent());
       chartHasData = true;
     }
   }
