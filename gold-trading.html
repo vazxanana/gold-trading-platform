@@ -1085,6 +1085,44 @@
     .tile-spark { margin-top: 10px; height: 30px; }
     .tile-spark svg { width: 100%; height: 30px; display: block; }
 
+    /* ===== AI Report + World News ===== */
+    .seg-toggle { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+    .seg-tab { background: transparent; border: none; color: var(--text-tertiary); font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 6px; cursor: pointer; letter-spacing: 0.3px; font-family: inherit; transition: all .2s; }
+    .seg-tab.active { background: rgba(212,175,55,0.16); color: var(--accent-gold); }
+    .seg-tab:hover:not(.active) { color: var(--text-secondary); }
+    .seg-refresh { background: transparent; border: none; color: var(--text-tertiary); font-size: 14px; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+    .seg-refresh:hover { color: var(--accent-gold); }
+    .seg-refresh.spin { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .report-card { padding: 22px 26px; }
+    .report-meta { font-size: 10.5px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .report-meta .ai-badge { padding: 2px 8px; border-radius: 5px; font-weight: 800; }
+    .report-meta .ai-on { background: rgba(52,211,153,0.16); color: var(--accent-green); }
+    .report-meta .ai-off { background: rgba(255,255,255,0.06); color: var(--text-tertiary); }
+    .report-body { font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+    .report-body h3 { font-size: 17px; color: var(--text-primary); margin: 0 0 10px; font-family: 'Lora', serif; }
+    .report-body h4 { font-size: 12px; color: var(--accent-gold); text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 6px; }
+    .report-body p { margin: 0 0 11px; }
+    .report-body strong { color: var(--text-primary); }
+    .report-body em { color: var(--text-tertiary); font-style: italic; }
+    .report-body ul { margin: 0 0 12px; padding-left: 4px; list-style: none; }
+    .report-body li { position: relative; padding-left: 16px; margin-bottom: 6px; }
+    .report-body li::before { content: '▸'; position: absolute; left: 0; color: var(--accent-gold); }
+
+    .news-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 900px) { .news-list { grid-template-columns: 1fr; } }
+    .news-item { display: block; padding: 12px 15px; border-radius: 10px; background: rgba(255,255,255,0.025); border: 1px solid var(--border); text-decoration: none; transition: all .2s; }
+    .news-item:hover { background: rgba(255,255,255,0.05); border-color: rgba(212,175,55,0.3); transform: translateY(-1px); }
+    .news-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .news-tag { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 5px; flex-shrink: 0; }
+    .news-tag.Rates,.news-tag.Inflation { background: rgba(91,155,255,0.16); color: var(--accent-blue); }
+    .news-tag.Geopolitics { background: rgba(248,113,113,0.16); color: var(--accent-red); }
+    .news-tag.Gold,.news-tag.Energy { background: rgba(212,175,55,0.16); color: var(--accent-gold); }
+    .news-tag.Growth,.news-tag.FX,.news-tag.Markets { background: rgba(255,255,255,0.06); color: var(--text-tertiary); }
+    .news-meta { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
+    .news-title { font-size: 12.5px; line-height: 1.4; color: var(--text-primary); font-weight: 500; }
+
     /* ===== Multi-timeframe chart (side by side, synced) ===== */
     .mtf-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; height: 460px; background: var(--border); }
     .mtf-pane { position: relative; min-width: 0; background: #0C1019; }
@@ -1396,6 +1434,34 @@
     <div id="majorsGrid" class="majors-grid">
       <div class="opp-empty">Loading cross-pair board…</div>
     </div>
+  </div>
+
+  <!-- AI MARKET REPORT -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">AI Market Report</div>
+      <div class="seg-toggle">
+        <button class="seg-tab active" data-rep="daily">Daily</button>
+        <button class="seg-tab" data-rep="weekly">Weekly</button>
+        <button class="seg-refresh" id="repRefresh" title="Regenerate">↻</button>
+      </div>
+    </div>
+    <div class="card glass report-card">
+      <div class="report-meta" id="reportMeta">Generating briefing…</div>
+      <div class="report-body" id="reportBody"></div>
+    </div>
+  </div>
+
+  <!-- WORLD & MARKETS NEWS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">World &amp; Markets</div>
+      <div class="seg-toggle">
+        <button class="seg-tab active" data-news="1d">Today</button>
+        <button class="seg-tab" data-news="7d">This week</button>
+      </div>
+    </div>
+    <div id="newsList" class="news-list"><div class="opp-empty">Loading headlines…</div></div>
   </div>
 
   <!-- MACRO DRIVERS FIRST -->
@@ -2572,6 +2638,70 @@
     </svg>`;
   }
 
+  // ===== AI Market Report + World News =====
+  function mdToHtml(md) {
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/_(.+?)_/g, '<em>$1</em>');
+    const out = []; let inList = false;
+    const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    (md || '').split('\n').forEach((raw) => {
+      const line = raw.trim();
+      if (!line) { closeList(); return; }
+      if (/^#{1,4}\s/.test(line)) { closeList(); const lvl = line.match(/^#+/)[0].length; const tag = 'h' + Math.min(4, lvl + 1); out.push(`<${tag}>${inline(line.replace(/^#+\s/, ''))}</${tag}>`); }
+      else if (/^[-*]\s/.test(line)) { if (!inList) { out.push('<ul>'); inList = true; } out.push('<li>' + inline(line.replace(/^[-*]\s/, '')) + '</li>'); }
+      else { closeList(); out.push('<p>' + inline(line) + '</p>'); }
+    });
+    closeList();
+    return out.join('');
+  }
+
+  let reportType = 'daily';
+  async function loadReport(force) {
+    const meta = document.getElementById('reportMeta'), body = document.getElementById('reportBody');
+    const btn = document.getElementById('repRefresh');
+    if (btn) btn.classList.add('spin');
+    if (meta && force) meta.textContent = 'Generating briefing…';
+    try {
+      const res = await fetch(`${apiBase}/api/report?type=${reportType}${force ? '&force=1' : ''}`, { cache: 'no-store' });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || 'failed');
+      if (body) body.innerHTML = mdToHtml(d.report);
+      if (meta) {
+        const when = new Date(d.generatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        meta.innerHTML = `<span class="ai-badge ${d.ai ? 'ai-on' : 'ai-off'}">${d.ai ? 'AI · ' + (d.model || '') : 'Rules-based'}</span> ${reportType === 'weekly' ? 'Weekly' : 'Daily'} · generated ${when} UTC`;
+      }
+    } catch (e) {
+      if (meta) meta.textContent = 'Report unavailable: ' + e.message;
+      if (body) body.innerHTML = '';
+    }
+    if (btn) btn.classList.remove('spin');
+  }
+
+  const NEWS_AGO = (ts) => { const m = (Date.now() - ts) / 60000; return m < 60 ? Math.round(m) + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; };
+  let newsRange = '1d';
+  async function loadNews() {
+    const el = document.getElementById('newsList');
+    if (!el) return;
+    try {
+      const res = await fetch(`${apiBase}/api/news?range=${newsRange}`, { cache: 'no-store' });
+      const d = await res.json();
+      if (!d.ok || !d.items || !d.items.length) throw new Error('no items');
+      el.innerHTML = d.items.map((n) => `<a class="news-item" href="${n.link}" target="_blank" rel="noopener noreferrer">
+        <div class="news-row"><span class="news-tag ${n.tag}">${n.tag}</span><span class="news-meta">${n.source} · ${n.ts ? NEWS_AGO(n.ts) : ''}</span></div>
+        <div class="news-title">${n.title}</div></a>`).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="opp-empty">Headlines unavailable right now.</div>';
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const rep = e.target.closest('.seg-tab[data-rep]');
+    if (rep) { document.querySelectorAll('.seg-tab[data-rep]').forEach((t) => t.classList.toggle('active', t === rep)); reportType = rep.dataset.rep; loadReport(false); return; }
+    const nw = e.target.closest('.seg-tab[data-news]');
+    if (nw) { document.querySelectorAll('.seg-tab[data-news]').forEach((t) => t.classList.toggle('active', t === nw)); newsRange = nw.dataset.news; loadNews(); return; }
+    if (e.target.closest('#repRefresh')) loadReport(true);
+  });
+
   // ===== Morning Macro Cockpit — the 7 thresholds (from the PDF) =====
   function thrRow(name, sub, val, pillTxt, pillCls) {
     return `<div class="thr-row"><div class="thr-name">${name}<small>${sub}</small></div>
@@ -2942,6 +3072,11 @@
     loadMajors();
     const majorsInterval = setInterval(loadMajors, 120000);
 
+    // World news + AI report
+    loadNews(); loadReport(false);
+    const newsInterval = setInterval(loadNews, 600000);          // 10 min
+    const reportInterval = setInterval(() => loadReport(false), 1800000); // 30 min
+
     // BERG live SOP side panel (3 intraday Yahoo calls) — every 60s
     setTimeout(loadBerg, 2500);
     const bergInterval = setInterval(loadBerg, 60000);
@@ -2969,6 +3104,8 @@
       clearInterval(calendarInterval);
       clearInterval(levelsInterval);
       clearInterval(majorsInterval);
+      clearInterval(newsInterval);
+      clearInterval(reportInterval);
       clearInterval(bergInterval);
     });
 

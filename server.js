@@ -54,6 +54,96 @@ function getJson(url) {
   });
 }
 
+// Raw-text fetch (for RSS/XML) + tiny POST helper (for the Anthropic API)
+function getText(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' }, timeout: 10000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+        resolve(body);
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+function postJson(url, headers, bodyObj) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(bodyObj);
+    const u = new URL(url);
+    const req = https.request({
+      hostname: u.hostname, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...headers },
+      timeout: 45000
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(body);
+          if (res.statusCode < 200 || res.statusCode >= 300) { reject(new Error(`HTTP ${res.statusCode}: ${(j.error && j.error.message) || body.slice(0, 120)}`)); return; }
+          resolve(j);
+        } catch (e) { reject(new Error('bad JSON: ' + body.slice(0, 120))); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.write(data); req.end();
+  });
+}
+
+// ───────── World & markets news (Google News RSS — no key, datacenter-friendly) ─────────
+const NEWS_QUERY = '(gold price OR "Federal Reserve" OR inflation OR "rate cut" OR geopolitical OR "oil price" OR recession OR "treasury yields" OR "central bank" OR "US dollar")';
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/<[^>]+>/g, '').trim();
+}
+function tagOf(t) {
+  const s = t.toLowerCase();
+  if (/(fed|fomc|powell|rate|hike|cut|central bank|ecb|boe|boj)/.test(s)) return 'Rates';
+  if (/(inflation|cpi|pce|ppi|deflation)/.test(s)) return 'Inflation';
+  if (/(war|geopolit|sanction|conflict|israel|iran|russia|ukraine|china|tariff|election)/.test(s)) return 'Geopolitics';
+  if (/(gold|bullion|xau|precious)/.test(s)) return 'Gold';
+  if (/(oil|crude|wti|brent|opec|energy)/.test(s)) return 'Energy';
+  if (/(recession|gdp|jobs|payroll|unemployment|growth)/.test(s)) return 'Growth';
+  if (/(dollar|dxy|yen|euro|currency|forex)/.test(s)) return 'FX';
+  return 'Markets';
+}
+async function fetchNews(range) {
+  const when = range === '7d' ? '7d' : '1d';
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(NEWS_QUERY + ' when:' + when)}&hl=en-US&gl=US&ceid=US:en`;
+  const xml = await getText(url);
+  const items = [];
+  const re = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = re.exec(xml)) && items.length < 40) {
+    const blk = m[1];
+    const get = (tag) => { const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`).exec(blk); return r ? r[1] : ''; };
+    let title = decodeEntities(get('title'));
+    const link = decodeEntities(get('link'));
+    const pub = get('pubDate');
+    let source = decodeEntities(get('source'));
+    // Google appends " - Source" to titles
+    if (!source && / - [^-]+$/.test(title)) { const i = title.lastIndexOf(' - '); source = title.slice(i + 3); title = title.slice(0, i); }
+    const ts = pub ? new Date(pub).getTime() : 0;
+    if (title) items.push({ title, source: source || 'News', link, ts, tag: tagOf(title) });
+  }
+  items.sort((a, b) => b.ts - a.ts);
+  // light de-dup by title prefix
+  const seen = new Set(), out = [];
+  for (const it of items) { const k = it.title.slice(0, 50).toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(it); } }
+  return out.slice(0, range === '7d' ? 18 : 14);
+}
+
 function parseYahooChart(payload, label) {
   const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
   const meta = result && result.meta;
@@ -749,6 +839,81 @@ if (!htmlContent) {
   console.warn('WARNING: HTML file not found. Will only serve API endpoints.');
 }
 
+// ───────── AI market report (Anthropic if key set, else data-driven fallback) ─────────
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+const reportCache = {};   // type -> { at, data }
+
+function quickBias(snap) {
+  let s = 5;
+  if (snap.tips) s += snap.tips.value < 1 ? 2 : snap.tips.value > 2 ? -2 : 0;
+  if (snap.dxy) s += snap.dxy.changePct < -0.1 ? 1 : snap.dxy.changePct > 0.1 ? -1 : 0;
+  if (snap.vix) s += snap.vix.price > 25 ? 1 : snap.vix.price < 14 ? -1 : 0;
+  s = Math.max(0, Math.min(10, s));
+  return { score: s * 10, label: s >= 6.5 ? 'Bullish' : s >= 4.5 ? 'Neutral' : 'Bearish' };
+}
+
+function fallbackReport(type, snap, news, events) {
+  const bias = quickBias(snap);
+  const g = snap.gold, d = snap.dxy, t = snap.tips, v = snap.vix, mc = snap.macro || {};
+  const f = (x, n = 2) => (x == null ? '—' : Number(x).toFixed(n));
+  const topNews = news.slice(0, 5).map((n) => `- **${n.tag}:** ${n.title} _(${n.source})_`).join('\n');
+  const nextEv = (events || []).filter((e) => new Date(e.DateTime) > new Date()).slice(0, 3)
+    .map((e) => `- ${e.Country || e.Currency}: ${e.Event} — fcst ${e.Consensus || '—'}`).join('\n');
+  return `## Meridian Gold Desk — ${type === 'weekly' ? 'Weekly' : 'Daily'} Briefing
+
+**Bias: ${bias.label} (${bias.score}%)** — gold ${g ? '$' + f(g.price, 0) : '—'} (${g ? (g.changePct >= 0 ? '+' : '') + f(g.changePct) + '%' : '—'} on the day).
+
+**Macro backdrop.** 10Y real yield ${t ? f(t.value) + '%' : '—'}${t && t.change1w != null ? ` (${t.change1w <= 0 ? 'falling — supportive' : 'rising — a headwind'})` : ''}; DXY ${d ? f(d.price) : '—'} (${d ? (d.changePct >= 0 ? '+' : '') + f(d.changePct) + '%' : '—'}); VIX ${v ? f(v.price) : '—'} (${v ? (v.price > 25 ? 'risk-off' : v.price < 15 ? 'risk-on' : 'caution') : '—'}). Yield curve ${mc.yieldCurve ? f(mc.yieldCurve.value) + (mc.yieldCurve.value < 0 ? ' (inverted)' : ' (normal)') : '—'}; Sahm ${mc.sahm ? f(mc.sahm.value) + (mc.sahm.value >= 0.5 ? ' (recession signal)' : ' (no signal)') : '—'}.
+
+**World & market drivers.**
+${topNews || '- No headlines retrieved.'}
+
+**On the radar.**
+${nextEv || '- No high-impact events scheduled.'}
+
+**Gold takeaway.** Real yields remain the dominant driver (~60–70% of moves). ${bias.label === 'Bullish' ? 'Backdrop favours dips-bought; align longs with a softer DXY and falling real yields.' : bias.label === 'Bearish' ? 'Backdrop favours selling rallies; firm real yields/USD cap upside.' : 'No clear edge — trade the levels and respect the next catalyst.'}
+
+_Rules-based synthesis from live data. Add an ANTHROPIC_API_KEY for an AI-written report._`;
+}
+
+async function generateReport(type) {
+  const cached = reportCache[type];
+  const maxAge = type === 'weekly' ? 6 * 3600000 : 30 * 60000;
+  if (cached && Date.now() - cached.at < maxAge) return cached.data;
+
+  const [snap, news] = await Promise.all([
+    marketSnapshot().catch(() => ({})),
+    fetchNews(type === 'weekly' ? '7d' : '1d').catch(() => [])
+  ]);
+  let events = [];
+  try { events = await fetchForexFactoryCalendar(); } catch (e) { try { events = getHighImpactCalendarEvents(); } catch (e2) {} }
+
+  let report, ai = false;
+  if (ANTHROPIC_KEY) {
+    try {
+      const ctx = {
+        gold: snap.gold, dxy: snap.dxy, tips: snap.tips, vix: snap.vix, macro: snap.macro,
+        headlines: news.slice(0, 12).map((n) => ({ tag: n.tag, title: n.title, source: n.source })),
+        upcoming: (events || []).filter((e) => new Date(e.DateTime) > new Date()).slice(0, 6)
+      };
+      const sys = `You are the senior macro strategist at Meridian Gold Desk, an institutional gold-trading desk. Write a concise, professional ${type === 'weekly' ? 'WEEKLY' : 'DAILY'} market briefing centred on GOLD (XAUUSD) and the macro backdrop, using ONLY the live data and headlines provided (do not invent numbers). Structure with markdown headings: a one-line bias call; Macro backdrop (real yields, USD, risk/VIX, curve); World & geopolitical developments (from the headlines); On the radar (upcoming events); Gold takeaway (actionable). Real yields are the dominant gold driver (~60-70%). Keep under 320 words. End with a one-line risk disclaimer.`;
+      const j = await postJson('https://api.anthropic.com/v1/messages',
+        { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        { model: ANTHROPIC_MODEL, max_tokens: 1000, system: sys, messages: [{ role: 'user', content: 'LIVE DATA:\n' + JSON.stringify(ctx, null, 2) }] });
+      report = (j.content || []).map((c) => c.text || '').join('').trim();
+      ai = true;
+    } catch (e) {
+      report = fallbackReport(type, snap, news, events) + `\n\n_(AI generation failed: ${e.message})_`;
+    }
+  } else {
+    report = fallbackReport(type, snap, news, events);
+  }
+  const data = { ok: true, type, ai, model: ai ? ANTHROPIC_MODEL : null, report, generatedAt: new Date().toISOString() };
+  reportCache[type] = { at: Date.now(), data };
+  return data;
+}
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -787,6 +952,36 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(502, { 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ok: false, pair, error: error.message }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/news') {
+    res.setHeader('Content-Type', 'application/json');
+    const params = new URLSearchParams((req.url.split('?')[1]) || '');
+    const range = params.get('range') === '7d' ? '7d' : '1d';
+    try {
+      const items = await fetchNews(range);
+      res.writeHead(200, { 'Cache-Control': 'max-age=300' });
+      res.end(JSON.stringify({ ok: true, range, items, fetchedAt: new Date().toISOString() }));
+    } catch (error) {
+      res.writeHead(502, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: error.message }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/report') {
+    res.setHeader('Content-Type', 'application/json');
+    const params = new URLSearchParams((req.url.split('?')[1]) || '');
+    const type = params.get('type') === 'weekly' ? 'weekly' : 'daily';
+    try {
+      const data = await generateReport(type);
+      res.writeHead(200, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(data));
+    } catch (error) {
+      res.writeHead(502, { 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: error.message }));
     }
     return;
   }
