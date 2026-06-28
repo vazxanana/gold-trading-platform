@@ -508,30 +508,41 @@ function egef(bars, side) {
 }
 
 async function fetchBerg(side) {
-  const [h1, m15, m1] = await Promise.all([
+  const settled = await Promise.allSettled([
     fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d')
   ]);
-  const price = m1[m1.length-1].c;
+  const h1 = settled[0].status === 'fulfilled' ? settled[0].value : null;
+  const m15 = settled[1].status === 'fulfilled' ? settled[1].value : null;
+  const m1 = settled[2].status === 'fulfilled' ? settled[2].value : null;
+  if (!h1 && !m15 && !m1) throw new Error('intraday feed offline (all timeframes)');
+  const last = (a) => (a && a.length ? a[a.length - 1].c : null);
+  const price = last(m1) != null ? last(m1) : (last(m15) != null ? last(m15) : last(h1));
 
   // 1+2. most recent valid H1 EG/EF zone + is price inside it
-  const H = egef(h1, side); let zone = null;
-  for (let i = h1.length-1; i >= 1 && i > h1.length-25; i--) {
-    if (H.eg[i] || H.ef[i]) {
-      const top = h1[i].h, bot = h1[i].l; let valid = true;
-      for (let j = i+1; j < h1.length; j++) { if (side==='sell' ? h1[j].c > top : h1[j].c < bot) { valid = false; break; } }
-      if (valid) { zone = { top, bot }; break; }
+  let H = null, zone = null;
+  if (h1) {
+    H = egef(h1, side);
+    for (let i = h1.length-1; i >= 1 && i > h1.length-25; i--) {
+      if (H.eg[i] || H.ef[i]) {
+        const top = h1[i].h, bot = h1[i].l; let valid = true;
+        for (let j = i+1; j < h1.length; j++) { if (side==='sell' ? h1[j].c > top : h1[j].c < bot) { valid = false; break; } }
+        if (valid) { zone = { top, bot }; break; }
+      }
     }
   }
-  const cmpInZone = !!(zone && price <= zone.top && price >= zone.bot);
+  const cmpInZone = !!(zone && price != null && price <= zone.top && price >= zone.bot);
 
   // 3. recent M15 EG (arm)
-  const M = egef(m15, side); let m15Arm = false;
-  for (let i = m15.length-1; i >= Math.max(1, m15.length-8); i--) { if (M.eg[i]) { m15Arm = true; break; } }
+  let M = null, m15Arm = false;
+  if (m15) { M = egef(m15, side); for (let i = m15.length-1; i >= Math.max(1, m15.length-8); i--) { if (M.eg[i]) { m15Arm = true; break; } } }
 
   // 4+5. M1 EF (the "fail") then a confirming M1 EG
-  const m = egef(m1, side); let m1Ef = false, efIdx = -1, m1Eg = false, egBar = null;
-  for (let i = m1.length-1; i >= Math.max(1, m1.length-15); i--) { if (m.ef[i]) { m1Ef = true; efIdx = i; break; } }
-  if (m1Ef) for (let i = efIdx+1; i < m1.length; i++) { if (m.eg[i]) { m1Eg = true; egBar = m1[i]; break; } }
+  let mflags = null, m1Ef = false, efIdx = -1, m1Eg = false, egBar = null;
+  if (m1) {
+    mflags = egef(m1, side);
+    for (let i = m1.length-1; i >= Math.max(1, m1.length-15); i--) { if (mflags.ef[i]) { m1Ef = true; efIdx = i; break; } }
+    if (m1Ef) for (let i = efIdx+1; i < m1.length; i++) { if (mflags.eg[i]) { m1Eg = true; egBar = m1[i]; break; } }
+  }
 
   const signal = !!(zone && cmpInZone && m15Arm && m1Ef && m1Eg);
 
@@ -562,12 +573,12 @@ async function fetchBerg(side) {
     }
     return { candles: slice.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })), markers };
   };
-  const tfs = {
-    h1: tfPack(h1, H, 100),
-    m15: tfPack(m15, M, 150),
-    m1: tfPack(m1, m, 120)
-  };
-  return { ok: true, side, price, zone, tfs, candles: tfs.m15.candles,
+  const tfs = {};
+  if (h1) tfs.h1 = tfPack(h1, H, 100);
+  if (m15) tfs.m15 = tfPack(m15, M, 150);
+  if (m1) tfs.m1 = tfPack(m1, mflags, 120);
+  return { ok: true, side, price, zone, tfs,
+    candles: tfs.m15 ? tfs.m15.candles : (tfs.m1 ? tfs.m1.candles : []),
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
 }
 
