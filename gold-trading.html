@@ -1123,6 +1123,26 @@
     .news-meta { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
     .news-title { font-size: 12.5px; line-height: 1.4; color: var(--text-primary); font-weight: 500; }
 
+    /* ===== Scalp Desk ===== */
+    .scalp-card { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 22px; align-items: center; padding: 22px 26px; }
+    @media (max-width: 820px) { .scalp-card { grid-template-columns: 1fr; } }
+    .scalp-verdict-wrap { border-right: 1px solid var(--border); padding-right: 22px; }
+    @media (max-width: 820px) { .scalp-verdict-wrap { border-right: none; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 16px; } }
+    .scalp-verdict { font-size: 26px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.1; }
+    .scalp-verdict.sv-long { color: var(--accent-green); }
+    .scalp-verdict.sv-short { color: var(--accent-red); }
+    .scalp-verdict.sv-wait { color: var(--accent-red); }
+    .scalp-verdict.sv-ok { color: var(--accent-amber); }
+    .scalp-verdict.sv-neutral { color: var(--text-secondary); }
+    .scalp-reason { font-size: 12px; color: var(--text-secondary); margin-top: 8px; line-height: 1.5; }
+    .scalp-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; }
+    @media (max-width: 560px) { .scalp-rows { grid-template-columns: 1fr; } }
+    .scalp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-light); }
+    .scalp-row .sr-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-tertiary); font-weight: 700; }
+    .scalp-row .sr-v { font-size: 12.5px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 7px; }
+    .sr-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .sr-good { background: var(--accent-green); } .sr-warn { background: var(--accent-amber); } .sr-bad { background: var(--accent-red); } .sr-neu { background: var(--text-tertiary); }
+
     /* ===== Section nav (table of contents) ===== */
     html { scroll-behavior: smooth; }
     .section-nav { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 24px; align-items: center; }
@@ -1391,6 +1411,21 @@
     </div>
   </div>
 
+  <!-- SCALP DESK -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Scalp Desk</div>
+      <div class="section-sub">Right-now read for day trades &amp; scalps · session · volatility · news · bias</div>
+    </div>
+    <div class="card glass scalp-card" id="scalpCard">
+      <div class="scalp-verdict-wrap">
+        <div class="scalp-verdict" id="scalpVerdict">—</div>
+        <div class="scalp-reason" id="scalpReason">Waiting for live feeds…</div>
+      </div>
+      <div class="scalp-rows" id="scalpRows"></div>
+    </div>
+  </div>
+
   <!-- TRADE OPPORTUNITIES -->
   <div class="section">
     <div class="section-header">
@@ -1543,13 +1578,13 @@
   <!-- MULTI-TIMEFRAME CHART (full width, side by side, synced) -->
   <div class="section">
     <div class="chart-container glass-premium" id="tradingview_chart">
-      <div class="chart-header">XAU/USD — Weekly · Daily · H1 · synced
+      <div class="chart-header">XAU/USD — Daily · H4 · M15 · synced
         <span class="mtf-legend"><i class="sq-eg"></i>Engulfing (last 4) <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
       </div>
       <div class="mtf-row" id="mtfStack">
-        <div class="mtf-pane"><div class="mtf-tag">WEEKLY</div><div class="mtf-chart" id="tfW1"></div><div class="mtf-msg" id="msgW1"></div></div>
         <div class="mtf-pane"><div class="mtf-tag">DAILY</div><div class="mtf-chart" id="tfD1"></div><div class="mtf-msg" id="msgD1"></div></div>
-        <div class="mtf-pane"><div class="mtf-tag">H1</div><div class="mtf-chart" id="tfH1"></div><div class="mtf-msg" id="msgH1"></div></div>
+        <div class="mtf-pane"><div class="mtf-tag">H4</div><div class="mtf-chart" id="tfH4"></div><div class="mtf-msg" id="msgH4"></div></div>
+        <div class="mtf-pane"><div class="mtf-tag">M15</div><div class="mtf-chart" id="tfM15"></div><div class="mtf-msg" id="msgM15"></div></div>
       </div>
     </div>
   </div>
@@ -1664,88 +1699,6 @@
           <div class="level-label">R3 - Monthly Target</div>
           <div class="level-price" id="resistance3">—</div>
           <div class="level-description">Extended calculated upside</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- MISSED MOVE SCENARIOS -->
-  <div class="section">
-    <div class="section-header">
-      <div class="section-title">Contingency: Missed Move Scenarios</div>
-    </div>
-
-    <div class="card glass">
-      <div class="scenario bullish">
-        <div class="scenario-title" id="scenario1Title">Scenario 1: Re-Entry at R1</div>
-        <div class="scenario-text">
-          <strong>Setup:</strong> Market gaps through the calculated entry level<br/>
-          <strong>Action:</strong> <span id="scenario1Action">Waiting for live levels</span><br/>
-          <strong>Stop:</strong> <span id="scenario1Stop">—</span><br/>
-          <strong>Target:</strong> <span id="scenario1Target">—</span><br/>
-          <strong>Key Rule:</strong> Only enter on pullback — never chase breakouts
-        </div>
-      </div>
-
-      <div class="scenario">
-        <div class="scenario-title" id="scenario2Title">Scenario 2: Momentum Play at R2</div>
-        <div class="scenario-text">
-          <strong>Setup:</strong> Strong momentum continuation through R1<br/>
-          <strong>Action:</strong> <span id="scenario2Action">Waiting for live levels</span><br/>
-          <strong>Stop:</strong> <span id="scenario2Stop">—</span><br/>
-          <strong>Target:</strong> <span id="scenario2Target">—</span><br/>
-          <strong>Risk Level:</strong> MODERATE — momentum trade, tighter stops required
-        </div>
-      </div>
-
-      <div class="scenario bearish">
-        <div class="scenario-title">Scenario 3: Patient Entry — Wait for Pullback</div>
-        <div class="scenario-text">
-          <strong>Strategy:</strong> Do NOT chase breakouts above calculated resistance<br/>
-          <strong>Action:</strong> Wait for 4-8 hour pullback to form<br/>
-          <strong>Re-Entry Level:</strong> <span id="scenario3Entry">Waiting for live levels</span><br/>
-          <strong>Advantage:</strong> Better risk/reward, reduced drawdown<br/>
-          <strong>Key Principle:</strong> Patience = superior entries and exits
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- EXECUTION FRAMEWORK -->
-  <div class="section">
-    <div class="section-header">
-      <div class="section-title">4-Step Execution Workflow</div>
-    </div>
-
-    <div class="card glass">
-      <div class="grid-2">
-        <div class="direction-block">
-          <div class="block-title">Step 1: Macro Bias Confirmation</div>
-          <div class="block-content">
-            Establish weekly directional bias from 5 key drivers<br/>
-            Target: live score above 65% with all feeds connected
-          </div>
-        </div>
-        <div class="direction-block">
-          <div class="block-title">Step 2: 1-Hour Structure Analysis</div>
-          <div class="block-content">
-            Identify key support/resistance on 1H timeframe<br/>
-            Confluence with macro bias required
-          </div>
-        </div>
-        <div class="direction-block">
-          <div class="block-title">Step 3: Pattern Confirmation</div>
-          <div class="block-content">
-            Wait for double-bottom pattern formation<br/>
-            Volume breakout of neckline
-          </div>
-        </div>
-        <div class="direction-block">
-          <div class="block-title">Step 4: 1-Minute Entry Execution</div>
-          <div class="block-content">
-            Execute on neckline break + pullback<br/>
-            Tight risk management in effect
-          </div>
         </div>
       </div>
     </div>
@@ -1950,7 +1903,7 @@
 
   // Sync the crosshair across the three panes (hover one → line up the others by time)
   function setupChartSync() {
-    const arr = [panes.w1, panes.d1, panes.h1].filter(Boolean);
+    const arr = [panes.d1, panes.h4, panes.m15].filter(Boolean);
     let syncing = false;
     arr.forEach((src) => {
       src.chart.subscribeCrosshairMove((param) => {
@@ -1978,10 +1931,10 @@
       return;
     }
     try {
-      panes.w1 = makePane('tfW1');
       panes.d1 = makePane('tfD1');
-      panes.h1 = makePane('tfH1');
-      if (!panes.w1 || !panes.d1 || !panes.h1) throw new Error('panes missing');
+      panes.h4 = makePane('tfH4');
+      panes.m15 = makePane('tfM15');
+      if (!panes.d1 || !panes.h4 || !panes.m15) throw new Error('panes missing');
       setupChartSync();
       console.log('MTF charts initialized (H1/M15/M1)');
       loadBerg();
@@ -1992,10 +1945,10 @@
   }
 
   function renderBergChart(b) {
-    if (!panes.h1) return;
+    if (!panes.m15) return;
     const side = (b && b.side) || 'sell';
     const offline = !b || !b.ok || !b.tfs;
-    ['w1', 'd1', 'h1'].forEach((tf) => {
+    ['d1', 'h4', 'm15'].forEach((tf) => {
       const pane = panes[tf], d = !offline && b.tfs[tf];
       const hasData = d && Array.isArray(d.candles) && d.candles.length >= 3;
       const msg = document.getElementById('msg' + tf.toUpperCase());
@@ -2048,7 +2001,7 @@
       }
     });
     if (!chartHasData) {
-      ['w1', 'd1', 'h1'].forEach((tf) => panes[tf] && panes[tf].chart.timeScale().fitContent());
+      ['d1', 'h4', 'm15'].forEach((tf) => panes[tf] && panes[tf].chart.timeScale().fitContent());
       chartHasData = true;
     }
   }
@@ -2340,6 +2293,7 @@
     generateOpportunities();
     renderThresholds();
     renderTradeFilter();
+    renderScalpDesk();
     const gauge = $('biasGauge');
     if (gauge) {
       gauge.style.width = present.length ? `${composite}%` : '0%';
@@ -2912,6 +2866,56 @@
     } catch (e) {
       grid.innerHTML = '<div class="opp-empty">Cross-pair feed offline.</div>';
     }
+  }
+
+  // ===== Scalp Desk — right-now read for day trades / scalps =====
+  function renderScalpDesk() {
+    const vEl = document.getElementById('scalpVerdict');
+    if (!vEl) return;
+    const v = state.vix, g = state.gold, L = currentLevels;
+    const hr = new Date().getUTCHours();
+    // Session (PDF edge: H12–15 prime London-close→NY; H07–11 ok; else thin)
+    let sess, sessQ;
+    if (hr >= 12 && hr <= 15) { sess = `NY momentum (H${hr} UTC)`; sessQ = 'good'; }
+    else if (hr >= 7 && hr <= 11) { sess = `London AM (H${hr} UTC)`; sessQ = 'warn'; }
+    else { sess = `Off-session (H${hr} UTC)`; sessQ = 'bad'; }
+    // Volatility
+    const vix = v ? v.price : null;
+    const volQ = vix == null ? 'neu' : vix >= 18 ? 'good' : vix >= 14 ? 'warn' : 'bad';
+    const volTxt = vix == null ? '—' : `VIX ${fmt(vix)} · ${vix >= 18 ? 'lively' : vix >= 14 ? 'moderate' : 'quiet'}`;
+    // News gate
+    const newsMins = activeEvent ? (new Date(activeEvent.DateTime).getTime() - Date.now()) / 60000 : Infinity;
+    const newsImminent = newsMins > 0 && newsMins <= 30;
+    const newsTxt = (activeEvent && newsMins < 240) ? `${activeEvent.Event} in ${Math.ceil(newsMins)}m` : 'Calendar clear';
+    const newsQ = newsImminent ? 'bad' : (newsMins < 120 ? 'warn' : 'good');
+    // Macro lean
+    const comp = lastComposite, zone = lastZone;
+    const lean = zone === 'bull' ? 'Long' : zone === 'bear' ? 'Short' : 'Neutral';
+    const leanTxt = comp != null ? `${lean} (${comp}%)` : '—';
+    const leanQ = zone === 'bull' ? 'good' : zone === 'bear' ? 'bad' : 'neu';
+
+    let verdict, vClass, reason;
+    if (!g) { verdict = '—'; vClass = 'sv-neutral'; reason = 'Waiting for live feeds…'; }
+    else if (newsImminent) { verdict = 'STAND ASIDE'; vClass = 'sv-wait'; reason = `High-impact data (${activeEvent.Event}) in ${Math.ceil(newsMins)} min — let it print, then trade the reaction.`; }
+    else if (sessQ === 'bad') { verdict = 'LOW EDGE'; vClass = 'sv-wait'; reason = 'Off-session / thin liquidity (the session edge is H12–16 UTC). Scalp small or sit out.'; }
+    else if (volQ === 'bad') { verdict = 'TOO QUIET'; vClass = 'sv-ok'; reason = 'Volatility is low — ranges are tight and spread eats scalps. Wait for a pickup.'; }
+    else if (sessQ === 'good') {
+      verdict = lean === 'Neutral' ? 'SCALP THE RANGE' : ('SCALP ' + lean.toUpperCase());
+      vClass = lean === 'Short' ? 'sv-short' : lean === 'Long' ? 'sv-long' : 'sv-ok';
+      reason = lean === 'Neutral'
+        ? `Prime session, adequate range — fade the pivots: buy ${L ? fmt(L.support1, 0) : 'S1'} / sell ${L ? fmt(L.resistance1, 0) : 'R1'} with tight stops.`
+        : `Prime session with a ${lean.toLowerCase()} macro lean — favour ${lean.toLowerCase()}s on pullbacks; targets at the pivots.`;
+    } else { verdict = 'SELECTIVE'; vClass = 'sv-ok'; reason = 'Tradeable but not prime — be selective, tighter risk, take only the cleaner setups.'; }
+
+    vEl.textContent = verdict; vEl.className = 'scalp-verdict ' + vClass;
+    setText('scalpReason', reason);
+    const row = (k, val, q) => `<div class="scalp-row"><span class="sr-k">${k}</span><span class="sr-v"><span class="sr-dot sr-${q}"></span>${val}</span></div>`;
+    const rows = document.getElementById('scalpRows');
+    if (rows) rows.innerHTML =
+      row('Session', sess + (sessQ === 'good' ? ' · PRIME' : sessQ === 'warn' ? ' · OK' : ' · AVOID'), sessQ)
+      + row('Volatility', volTxt, volQ)
+      + row('News gate', newsTxt, newsQ)
+      + row('Macro lean', leanTxt, leanQ);
   }
 
   // ===== Trade Opportunities engine =====

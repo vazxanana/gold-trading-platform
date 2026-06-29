@@ -597,14 +597,29 @@ function egef(bars, side) {
   return { eg, ef };
 }
 
+// Aggregate H1 bars into H4 (Yahoo has no native 4h interval) — buckets aligned to 0/4/8/12/16/20 UTC.
+function resampleH4(h1bars) {
+  if (!h1bars || !h1bars.length) return null;
+  const out = [];
+  let cur = null;
+  for (const b of h1bars) {
+    const hr = new Date(b.t * 1000).getUTCHours();
+    const start = b.t - (hr % 4) * 3600 - 0; // start of the 4h bucket (seconds)
+    if (!cur || cur.t !== start) { if (cur) out.push(cur); cur = { t: start, o: b.o, h: b.h, l: b.l, c: b.c }; }
+    else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 async function fetchBerg(side) {
   const settled = await Promise.allSettled([
-    fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d'),
-    fetchBars('1wk', '2y'), fetchBars('1d', '1y')
+    fetchBars('60m', '1mo'), fetchBars('15m', '5d'), fetchBars('1m', '1d'), fetchBars('1d', '1y')
   ]);
   const val = (i) => settled[i].status === 'fulfilled' ? settled[i].value : null;
-  const h1 = val(0), m15 = val(1), m1 = val(2), w1 = val(3), d1 = val(4);
-  if (!h1 && !m15 && !m1 && !w1 && !d1) throw new Error('feed offline (all timeframes)');
+  const h1 = val(0), m15 = val(1), m1 = val(2), d1 = val(3);
+  const h4 = resampleH4(h1);
+  if (!h1 && !m15 && !m1 && !d1) throw new Error('feed offline (all timeframes)');
   const last = (a) => (a && a.length ? a[a.length - 1].c : null);
   const price = last(m1) != null ? last(m1) : (last(m15) != null ? last(m15) : last(h1));
 
@@ -652,25 +667,25 @@ async function fetchBerg(side) {
         live, at: live ? egBar.t : null };
     }
   }
-  // Pack each timeframe: candles + EG/EF marker positions (for the square boxes)
+  // Pack each timeframe: candles + EG/EF markers placed on the FIRST candle of the pair
+  // (the candle that gets engulfed, i-1 — that's where the engulfing originates).
   const tfPack = (bars, fl, lastN) => {
     const slice = bars.slice(-lastN);
     const startIdx = bars.length - slice.length;
     const markers = [];
-    for (let i = startIdx; i < bars.length; i++) {
-      if (fl.eg[i]) markers.push({ time: bars[i].t, kind: 'eg', high: bars[i].h, low: bars[i].l });
-      else if (fl.ef[i]) markers.push({ time: bars[i].t, kind: 'ef', high: bars[i].h, low: bars[i].l });
+    for (let i = Math.max(startIdx, 1); i < bars.length; i++) {
+      const p = bars[i - 1];   // first candle of the pair
+      if (fl.eg[i]) markers.push({ time: p.t, kind: 'eg', high: p.h, low: p.l });
+      else if (fl.ef[i]) markers.push({ time: p.t, kind: 'ef', high: p.h, low: p.l });
     }
     return { candles: slice.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })), markers };
   };
   const tfs = {};
-  if (w1) tfs.w1 = tfPack(w1, egef(w1, side), 90);
   if (d1) tfs.d1 = tfPack(d1, egef(d1, side), 130);
-  if (h1) tfs.h1 = tfPack(h1, H, 120);
+  if (h4) tfs.h4 = tfPack(h4, egef(h4, side), 130);
   if (m15) tfs.m15 = tfPack(m15, M, 150);
-  if (m1) tfs.m1 = tfPack(m1, mflags, 120);
   return { ok: true, side, price, zone, tfs,
-    candles: tfs.m15 ? tfs.m15.candles : (tfs.m1 ? tfs.m1.candles : []),
+    candles: tfs.m15 ? tfs.m15.candles : [],
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
 }
 
