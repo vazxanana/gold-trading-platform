@@ -1123,6 +1123,13 @@
     .news-meta { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
     .news-title { font-size: 12.5px; line-height: 1.4; color: var(--text-primary); font-weight: 500; }
 
+    /* ===== Section nav (table of contents) ===== */
+    html { scroll-behavior: smooth; }
+    .section-nav { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 24px; align-items: center; }
+    .nav-chip { font-size: 11px; font-weight: 700; color: var(--text-tertiary); text-decoration: none; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); transition: all .2s; letter-spacing: 0.3px; white-space: nowrap; }
+    .nav-chip:hover { color: var(--accent-gold); border-color: rgba(212,175,55,0.4); background: rgba(212,175,55,0.08); }
+    [id^="sec-"], #tradingview_chart { scroll-margin-top: 84px; }
+
     /* ===== Multi-timeframe chart (side by side, synced) ===== */
     .mtf-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; height: 460px; background: var(--border); }
     .mtf-pane { position: relative; min-width: 0; background: #0C1019; }
@@ -1138,7 +1145,7 @@
     .mtf-msg.show { display: flex; }
     .mtf-legend { font-size: 9.5px; font-weight: 400; color: var(--text-tertiary); letter-spacing: 0.3px; margin-left: 10px; }
     .mtf-legend i { display: inline-block; vertical-align: middle; margin: 0 3px 0 8px; }
-    .mtf-legend .sq-eg { width: 8px; height: 8px; background: #34D399; border-radius: 2px; }
+    .mtf-legend .sq-eg { width: 9px; height: 9px; background: rgba(255,209,102,0.15); border: 1.5px solid #FFD166; border-radius: 2px; }
     .mtf-legend .sq-ef { width: 8px; height: 8px; background: #E3A008; border-radius: 2px; }
     .mtf-legend .ln-zone { width: 12px; height: 0; border-top: 2px dashed #D4AF37; }
     .mtf-legend .ln-entry { width: 12px; height: 2px; background: #5B9BFF; }
@@ -1355,6 +1362,8 @@
 <!-- MAIN -->
 <div class="container">
 
+  <div class="section-nav" id="sectionNav"></div>
+
   <div class="market-brief">
     <div class="brief-card glass-premium">
       <div class="brief-kicker">Current Playbook</div>
@@ -1535,7 +1544,7 @@
   <div class="section">
     <div class="chart-container glass-premium" id="tradingview_chart">
       <div class="chart-header">XAU/USD — Weekly · Daily · H1 · synced
-        <span class="mtf-legend"><i class="sq-eg"></i>EG <i class="sq-ef"></i>EF <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
+        <span class="mtf-legend"><i class="sq-eg"></i>Engulfing (last 4) <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
       </div>
       <div class="mtf-row" id="mtfStack">
         <div class="mtf-pane"><div class="mtf-tag">WEEKLY</div><div class="mtf-chart" id="tfW1"></div><div class="mtf-msg" id="msgW1"></div></div>
@@ -1885,7 +1894,41 @@
     if (el) el.className = className;
   };
 
-  // Three synced lightweight-charts panes (H1 · M15 · M1) with BERG overlays + EG squares
+  // Rectangle primitive — draws a box on each engulfing candle (high→low, one bar wide)
+  function EgBoxRenderer(src) { this._s = src; }
+  EgBoxRenderer.prototype.draw = function (target) {
+    const s = this._s, chart = s._chart, series = s._series;
+    if (!chart || !series || !s._boxes || !s._boxes.length) return;
+    const ts = chart.timeScale();
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context, h = scope.horizontalPixelRatio, v = scope.verticalPixelRatio;
+      for (const b of s._boxes) {
+        const xc = ts.timeToCoordinate(b.t);
+        if (xc == null) continue;
+        const xp = ts.timeToCoordinate(b.tPrev), xn = ts.timeToCoordinate(b.tNext);
+        let left, right;
+        if (xp != null && xn != null) { left = (xp + xc) / 2; right = (xc + xn) / 2; }
+        else { left = xc - 7; right = xc + 7; }
+        const yH = series.priceToCoordinate(b.high), yL = series.priceToCoordinate(b.low);
+        if (yH == null || yL == null) continue;
+        const L = Math.round(left * h), R = Math.round(right * h), T = Math.round(Math.min(yH, yL) * v), B = Math.round(Math.max(yH, yL) * v);
+        ctx.fillStyle = b.fill; ctx.fillRect(L, T, R - L, B - T);
+        ctx.lineWidth = Math.max(1, Math.round(1.6 * h)); ctx.strokeStyle = b.color;
+        ctx.strokeRect(L, T, R - L, B - T);
+      }
+    });
+  };
+  function EgBoxPaneView(src) { this._s = src; }
+  EgBoxPaneView.prototype.update = function () {};
+  EgBoxPaneView.prototype.renderer = function () { return new EgBoxRenderer(this._s); };
+  EgBoxPaneView.prototype.zOrder = function () { return 'top'; };
+  function EgBoxPrimitive(boxes) { this._boxes = boxes || []; this._chart = null; this._series = null; this._req = null; this._views = [new EgBoxPaneView(this)]; }
+  EgBoxPrimitive.prototype.attached = function (p) { this._chart = p.chart; this._series = p.series; this._req = p.requestUpdate; };
+  EgBoxPrimitive.prototype.detached = function () {};
+  EgBoxPrimitive.prototype.paneViews = function () { return this._views; };
+  EgBoxPrimitive.prototype.setBoxes = function (boxes) { this._boxes = boxes || []; if (this._req) this._req(); };
+
+  // Three synced lightweight-charts panes with BERG overlays + EG rectangles
   function makePane(id) {
     const el = document.getElementById(id);
     if (!el) return null;
@@ -1963,15 +2006,29 @@
       if (!pane || !hasData) return;
       pane.series.setData(d.candles);
 
-      // EG = square box (coloured by setup side); EF = amber square
-      const markers = (d.markers || []).map((x) => ({
-        time: x.time,
-        position: side === 'sell' ? 'aboveBar' : 'belowBar',
-        color: x.kind === 'eg' ? (side === 'sell' ? '#F87171' : '#34D399') : 'rgba(227,160,8,0.95)',
-        shape: 'square',
-        size: x.kind === 'eg' ? 2 : 1
-      }));
-      pane.series.setMarkers(markers);
+      // Mark only the 4 most-recent engulfings with a rectangle drawn on the candle.
+      // Bright amber outline (contrasts with both red & green candles); fill tints direction.
+      const col = '#FFD166';
+      const fill = side === 'sell' ? 'rgba(248,113,113,0.16)' : 'rgba(52,211,153,0.16)';
+      const idxOf = new Map(d.candles.map((c, i) => [c.time, i]));
+      const egs = (d.markers || []).filter((m) => m.kind === 'eg').slice(-4);
+      const boxes = egs.map((m) => {
+        const i = idxOf.get(m.time);
+        return {
+          t: m.time,
+          tPrev: i > 0 ? d.candles[i - 1].time : m.time,
+          tNext: (i != null && i < d.candles.length - 1) ? d.candles[i + 1].time : m.time,
+          high: m.high, low: m.low, color: col, fill
+        };
+      });
+      try {
+        if (!pane.egPrim) { pane.egPrim = new EgBoxPrimitive(boxes); pane.series.attachPrimitive(pane.egPrim); }
+        else pane.egPrim.setBoxes(boxes);
+        pane.series.setMarkers([]);
+      } catch (e) {
+        // primitive unsupported → fall back to 4 square markers
+        pane.series.setMarkers(egs.map((m) => ({ time: m.time, position: side === 'sell' ? 'aboveBar' : 'belowBar', color: col, shape: 'square', size: 2 })));
+      }
 
       pane.lines.forEach((l) => { try { pane.series.removePriceLine(l); } catch (e) {} });
       pane.lines = [];
@@ -2638,6 +2695,31 @@
     </svg>`;
   }
 
+  // ===== Section nav (auto-built table of contents) =====
+  function buildSectionNav() {
+    const nav = document.getElementById('sectionNav');
+    if (!nav) return;
+    const items = [
+      { label: 'Report', match: 'AI Market Report' },
+      { label: 'News', match: 'World' },
+      { label: 'Macro Cockpit', match: 'Morning Macro Cockpit' },
+      { label: 'Drivers', match: 'Fundamental Analysis' },
+      { label: 'Cross-Pair', match: 'Cross-Pair' },
+      { label: 'Setups', match: 'Trade Opportunities' },
+      { label: 'Chart', el: document.getElementById('tradingview_chart') },
+      { label: 'Levels', match: 'Key Support' },
+      { label: 'Strategy', match: 'Trading Strategy' }
+    ];
+    const titles = Array.from(document.querySelectorAll('.section-title'));
+    nav.innerHTML = items.map((it, i) => {
+      let target = it.el;
+      if (!target && it.match) { const t = titles.find((x) => x.textContent.includes(it.match)); target = t ? (t.closest('.section') || t) : null; }
+      if (!target) return '';
+      if (!target.id) target.id = 'sec-' + i;
+      return `<a class="nav-chip" href="#${target.id}">${it.label}</a>`;
+    }).join('');
+  }
+
   // ===== AI Market Report + World News =====
   function mdToHtml(md) {
     const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -3071,6 +3153,8 @@
     // Cross-pair macro board (frankfurter — light) every 2 minutes
     loadMajors();
     const majorsInterval = setInterval(loadMajors, 120000);
+
+    buildSectionNav();
 
     // World news + AI report
     loadNews(); loadReport(false);
