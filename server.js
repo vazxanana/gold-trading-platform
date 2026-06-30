@@ -555,6 +555,30 @@ async function fetchGoldLevels() {
 const TD_KEY = process.env.TWELVEDATA_KEY || '';
 const TD_INT = { '60m': '1h', '15m': '15min', '1m': '1min' };
 
+// Keyless, datacenter-reliable candle fallback when Yahoo (GC=F) is IP-blocked on Railway.
+// PAXG/USDT = Pax Gold, a 1:1 physically-backed gold token that tracks spot gold within a few
+// dollars, trades 24/7 (so the chart populates on weekends too), and Binance's public market-data
+// API needs no key and isn't blocked from datacenter IPs the way Yahoo is.
+const BINANCE_INT = { '1m': '1m', '15m': '15m', '60m': '1h', '1d': '1d' };
+const BINANCE_LIMIT = { '1m': 200, '15m': 250, '60m': 600, '1d': 250 };
+let LAST_BARS_SOURCE = null; // which feed last served candles (for the chart's source label)
+async function fetchBarsBinance(interval) {
+  const bi = BINANCE_INT[interval];
+  if (!bi) return null;
+  const limit = BINANCE_LIMIT[interval] || 200;
+  for (const host of ['data-api.binance.vision', 'api.binance.com']) {
+    try {
+      const arr = await getJson(`https://${host}/api/v3/klines?symbol=PAXGUSDT&interval=${bi}&limit=${limit}`);
+      if (!Array.isArray(arr)) continue;
+      const bars = arr
+        .map(k => ({ t: Math.floor(k[0] / 1000), o: +k[1], h: +k[2], l: +k[3], c: +k[4] }))
+        .filter(b => [b.o, b.h, b.l, b.c].every(Number.isFinite));
+      if (bars.length > 5) { LAST_BARS_SOURCE = 'PAXG · Pax Gold (24/7 proxy)'; return bars.slice(0, -1); } // drop the still-forming bar
+    } catch (e) { /* try next host */ }
+  }
+  return null;
+}
+
 async function fetchBars(interval, range) {
   if (TD_KEY && TD_INT[interval]) {
     try {
@@ -564,7 +588,7 @@ async function fetchBars(interval, range) {
           t: Math.floor(new Date(v.datetime).getTime() / 1000),
           o: +v.open, h: +v.high, l: +v.low, c: +v.close
         })).filter(b => [b.o, b.h, b.l, b.c].every(Number.isFinite));
-        if (bars.length > 5) return bars.slice(0, -1);
+        if (bars.length > 5) { LAST_BARS_SOURCE = 'XAU/USD · Twelve Data'; return bars.slice(0, -1); }
       }
     } catch (e) { /* fall through to Yahoo */ }
   }
@@ -580,9 +604,12 @@ async function fetchBars(interval, range) {
         const o = q.open[i], h = q.high[i], l = q.low[i], c = q.close[i];
         if ([o, h, l, c].every(v => typeof v === 'number' && Number.isFinite(v))) bars.push({ t: ts[i], o, h, l, c });
       }
-      if (bars.length > 5) return bars.slice(0, -1);   // drop the forming bar
+      if (bars.length > 5) { LAST_BARS_SOURCE = 'COMEX · GC=F (Yahoo)'; return bars.slice(0, -1); }   // drop the forming bar
     } catch (e) { /* try next host */ }
   }
+  // Yahoo unreachable (e.g. blocked on Railway) — fall back to Binance PAXG klines.
+  const fb = await fetchBarsBinance(interval);
+  if (fb && fb.length > 5) return fb;
   throw new Error('bars unavailable: ' + interval);
 }
 
@@ -684,7 +711,7 @@ async function fetchBerg(side) {
   if (d1) tfs.d1 = tfPack(d1, egef(d1, side), 130);
   if (h4) tfs.h4 = tfPack(h4, egef(h4, side), 130);
   if (m15) tfs.m15 = tfPack(m15, M, 150);
-  return { ok: true, side, price, zone, tfs,
+  return { ok: true, side, price, zone, tfs, feed: LAST_BARS_SOURCE,
     candles: tfs.m15 ? tfs.m15.candles : [],
     steps: { h1Zone: !!zone, cmpInZone, m15Arm, m1Ef, m1Eg }, signal, trade };
 }

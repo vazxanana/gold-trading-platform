@@ -1163,6 +1163,9 @@
     .mtf-chart { width: 100%; height: 100%; }
     .mtf-msg { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; font-size: 11px; color: var(--text-tertiary); padding: 20px; pointer-events: none; z-index: 4; }
     .mtf-msg.show { display: flex; }
+    .chart-feed { font-size: 9.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.4px; margin-left: 10px; padding: 2px 8px; border-radius: 5px; color: var(--accent, #6ee7b7); background: rgba(110,231,183,0.10); border: 1px solid rgba(110,231,183,0.22); vertical-align: middle; }
+    .chart-feed:empty { display: none; }
+    .chart-feed.feed-proxy { color: #FFD166; background: rgba(255,209,102,0.10); border-color: rgba(255,209,102,0.28); }
     .mtf-legend { font-size: 9.5px; font-weight: 400; color: var(--text-tertiary); letter-spacing: 0.3px; margin-left: 10px; }
     .mtf-legend i { display: inline-block; vertical-align: middle; margin: 0 3px 0 8px; }
     .mtf-legend .sq-eg { width: 9px; height: 9px; background: rgba(255,209,102,0.15); border: 1.5px solid #FFD166; border-radius: 2px; }
@@ -1579,6 +1582,7 @@
   <div class="section">
     <div class="chart-container glass-premium" id="tradingview_chart">
       <div class="chart-header">XAU/USD — Daily · H4 · M15 · synced
+        <span class="chart-feed" id="chartFeed"></span>
         <span class="mtf-legend"><i class="sq-eg"></i>Engulfing (last 4) <i class="ln-zone"></i>Zone <i class="ln-entry"></i>Entry/SL/TP</span>
       </div>
       <div class="mtf-row" id="mtfStack">
@@ -1948,6 +1952,12 @@
     if (!panes.m15) return;
     const side = (b && b.side) || 'sell';
     const offline = !b || !b.ok || !b.tfs;
+    const feedEl = document.getElementById('chartFeed');
+    if (feedEl) {
+      const f = b && b.feed;
+      feedEl.textContent = f ? f : '';
+      feedEl.classList.toggle('feed-proxy', !!f && /PAXG/i.test(f));
+    }
     ['d1', 'h4', 'm15'].forEach((tf) => {
       const pane = panes[tf], d = !offline && b.tfs[tf];
       const hasData = d && Array.isArray(d.candles) && d.candles.length >= 3;
