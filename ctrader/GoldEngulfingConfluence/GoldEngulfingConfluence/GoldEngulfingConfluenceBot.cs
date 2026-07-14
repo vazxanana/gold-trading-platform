@@ -93,6 +93,33 @@ namespace cAlgo.Robots
         private Zone _m5BullEg;
         private Zone _m5BearEg;
 
+        /// <summary>
+        /// Step 5: per-direction M1 trigger state. For buys: price taps the M5 EG low,
+        /// then an M1 bearish engulfing forms (its HIGH is the trigger), then an M1 close
+        /// above that high signals entry. Sells are the exact mirror.
+        /// </summary>
+        private sealed class M1State
+        {
+            public bool Tapped;
+            public bool HasTrigger;
+            public double TriggerLevel;
+            public System.DateTime TriggerTime;
+
+            public void Reset()
+            {
+                Tapped = false;
+                HasTrigger = false;
+                TriggerLevel = 0;
+                TriggerTime = System.DateTime.MinValue;
+            }
+        }
+
+        private readonly M1State _m1Buy = new M1State();
+        private readonly M1State _m1Sell = new M1State();
+
+        // Open time of the last completed M1 bar we evaluated (process each M1 bar once).
+        private System.DateTime _lastM1Evaluated = System.DateTime.MinValue;
+
         protected override void OnStart()
         {
             // Hard rule #1: this bot's state machine is driven by the M5 chart it is attached to.
@@ -105,6 +132,10 @@ namespace cAlgo.Robots
 
             _m15Bars = MarketData.GetBars(TimeFrame.Minute15);
             _m1Bars = MarketData.GetBars(TimeFrame.Minute);
+
+            // React to every completed M1 bar without polling: cAlgo raises BarOpened when a
+            // new bar opens, at which point Count - 2 is the just-completed bar.
+            _m1Bars.BarOpened += OnM1BarOpened;
 
             Print("Started on {0} M5. M15 bars: {1}, M1 bars: {2}. Direction={3}, ZoneExpiry={4} bars (per own TF).",
                 SymbolName, _m15Bars.Count, _m1Bars.Count, TradeDirection, ZoneExpiryBars);
@@ -142,12 +173,14 @@ namespace cAlgo.Robots
                 Print("[M5-EG] BULL EG from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M5 bars.",
                     _m5BullEg.BarTime, _m5BullEg.Low, _m5BullEg.High, ZoneExpiryBars);
                 _m5BullEg = null;
+                _m1Buy.Reset();
             }
             if (_m5BearEg != null && last - _m5BearEg.BarIndex >= ZoneExpiryBars)
             {
                 Print("[M5-EG] BEAR EG from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M5 bars.",
                     _m5BearEg.BarTime, _m5BearEg.Low, _m5BearEg.High, ZoneExpiryBars);
                 _m5BearEg = null;
+                _m1Sell.Reset();
             }
 
             double lastClose = Bars.ClosePrices[last];
@@ -157,7 +190,10 @@ namespace cAlgo.Robots
                 && lastClose >= _m15BullZone.Low && lastClose <= _m15BullZone.High)
             {
                 if (_m5BullEg != null)
+                {
                     Print("[M5-EG] BULL EG from {0:yyyy-MM-dd HH:mm} replaced by newer confirmation.", _m5BullEg.BarTime);
+                    _m1Buy.Reset();
+                }
                 _m5BullEg = new Zone
                 {
                     Low = Bars.LowPrices[last],
@@ -174,7 +210,10 @@ namespace cAlgo.Robots
                 && lastClose >= _m15BearZone.Low && lastClose <= _m15BearZone.High)
             {
                 if (_m5BearEg != null)
+                {
                     Print("[M5-EG] BEAR EG from {0:yyyy-MM-dd HH:mm} replaced by newer confirmation.", _m5BearEg.BarTime);
+                    _m1Sell.Reset();
+                }
                 _m5BearEg = new Zone
                 {
                     Low = Bars.LowPrices[last],
@@ -255,6 +294,158 @@ namespace cAlgo.Robots
             }
         }
 
+        private void OnM1BarOpened(BarOpenedEventArgs args)
+        {
+            int last = _m1Bars.Count - 2; // just-completed M1 bar (hard rule #2)
+            if (last < 1)
+                return;
+
+            var lastOpenTime = _m1Bars.OpenTimes[last];
+            if (lastOpenTime == _lastM1Evaluated)
+                return;
+            _lastM1Evaluated = lastOpenTime;
+
+            if (_m5BullEg != null)
+                ProcessM1ForBuy(last, lastOpenTime);
+            if (_m5BearEg != null)
+                ProcessM1ForSell(last, lastOpenTime);
+        }
+
+        /// <summary>
+        /// Hard rule #3: session checks use the BAR's open-time hour, never Server.Time.
+        /// Window is [start, end) and wraps midnight when start > end.
+        /// </summary>
+        private bool IsInSession(System.DateTime barOpenTime)
+        {
+            if (!UseSessionFilter)
+                return true;
+            int hour = barOpenTime.Hour;
+            return SessionStartHourUtc <= SessionEndHourUtc
+                ? hour >= SessionStartHourUtc && hour < SessionEndHourUtc
+                : hour >= SessionStartHourUtc || hour < SessionEndHourUtc;
+        }
+
+        /// <summary>
+        /// Step 5 (bullish): (a) M1 low taps/breaks the M5 EG low, (b) then an M1 bearish
+        /// engulfing forms - its high is the trigger (a newer bearish EG updates the
+        /// trigger), (c) then an M1 bar closes above the trigger -> BUY signal.
+        /// The tap bar may itself be the bearish EG; the breaking close must be a later bar.
+        /// </summary>
+        private void ProcessM1ForBuy(int last, System.DateTime barTime)
+        {
+            var st = _m1Buy;
+
+            if (!st.Tapped && _m1Bars.LowPrices[last] <= _m5BullEg.Low)
+            {
+                st.Tapped = true;
+                Print("[M1 BUY] {0:yyyy-MM-dd HH:mm} low {1} tapped M5 EG low {2}.",
+                    barTime, _m1Bars.LowPrices[last], _m5BullEg.Low);
+            }
+
+            if (!st.Tapped)
+                return;
+
+            // (c) before (b) on the same bar is impossible: the trigger comes from a prior bar.
+            if (st.HasTrigger && _m1Bars.ClosePrices[last] > st.TriggerLevel && barTime > st.TriggerTime)
+            {
+                RaiseSignal(TradeType.Buy, last, barTime);
+                return;
+            }
+
+            if (IsBearishEngulfing(_m1Bars, last))
+            {
+                if (st.HasTrigger)
+                    Print("[M1 BUY] newer bearish EG replaces trigger {0} from {1:HH:mm}.", st.TriggerLevel, st.TriggerTime);
+                st.HasTrigger = true;
+                st.TriggerLevel = _m1Bars.HighPrices[last];
+                st.TriggerTime = barTime;
+                Print("[M1 BUY] {0:yyyy-MM-dd HH:mm} bearish EG after tap -> trigger = close above {1}.",
+                    barTime, st.TriggerLevel);
+            }
+        }
+
+        /// <summary>Step 5 (bearish) - exact mirror of <see cref="ProcessM1ForBuy"/>.</summary>
+        private void ProcessM1ForSell(int last, System.DateTime barTime)
+        {
+            var st = _m1Sell;
+
+            if (!st.Tapped && _m1Bars.HighPrices[last] >= _m5BearEg.High)
+            {
+                st.Tapped = true;
+                Print("[M1 SELL] {0:yyyy-MM-dd HH:mm} high {1} tapped M5 EG high {2}.",
+                    barTime, _m1Bars.HighPrices[last], _m5BearEg.High);
+            }
+
+            if (!st.Tapped)
+                return;
+
+            if (st.HasTrigger && _m1Bars.ClosePrices[last] < st.TriggerLevel && barTime > st.TriggerTime)
+            {
+                RaiseSignal(TradeType.Sell, last, barTime);
+                return;
+            }
+
+            if (IsBullishEngulfing(_m1Bars, last))
+            {
+                if (st.HasTrigger)
+                    Print("[M1 SELL] newer bullish EG replaces trigger {0} from {1:HH:mm}.", st.TriggerLevel, st.TriggerTime);
+                st.HasTrigger = true;
+                st.TriggerLevel = _m1Bars.LowPrices[last];
+                st.TriggerTime = barTime;
+                Print("[M1 SELL] {0:yyyy-MM-dd HH:mm} bullish EG after tap -> trigger = close below {1}.",
+                    barTime, st.TriggerLevel);
+            }
+        }
+
+        /// <summary>
+        /// Step 5: log the fully-formed signal with the SL/TP it would use - no orders yet.
+        /// The M5 EG that produced the signal is consumed (one signal per confirmation).
+        /// </summary>
+        private void RaiseSignal(TradeType tradeType, int m1Index, System.DateTime barTime)
+        {
+            bool isBuy = tradeType == TradeType.Buy;
+            var eg = isBuy ? _m5BullEg : _m5BearEg;
+
+            // Consume the confirmation and reset the M1 chain regardless of filters below,
+            // so a filtered-out signal doesn't fire again on the next M1 bar.
+            if (isBuy) { _m5BullEg = null; _m1Buy.Reset(); }
+            else { _m5BearEg = null; _m1Sell.Reset(); }
+
+            if (!IsInSession(barTime))
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} SKIPPED: outside session {2}:00-{3}:00 (bar hour {4}).",
+                    tradeType, barTime, SessionStartHourUtc, SessionEndHourUtc, barTime.Hour);
+                return;
+            }
+
+            // Entry approximates the breaking M1 close; live fill would be at market.
+            double entry = _m1Bars.ClosePrices[m1Index];
+            double slPrice = isBuy
+                ? eg.Low - SlBufferPips * Symbol.PipSize
+                : eg.High + SlBufferPips * Symbol.PipSize;
+            double slPips = (isBuy ? entry - slPrice : slPrice - entry) / Symbol.PipSize;
+
+            // Hard rule #5: cap the stop distance.
+            if (slPips > MaxSlPips)
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} REJECTED: SL {2:F1} pips exceeds MaxSlPips {3}.",
+                    tradeType, barTime, slPips, MaxSlPips);
+                return;
+            }
+            if (slPips <= 0)
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} REJECTED: non-positive SL distance ({2:F1} pips).",
+                    tradeType, barTime, slPips);
+                return;
+            }
+
+            double risk = slPips * Symbol.PipSize;
+            double tpPrice = isBuy ? entry + risk * RRRatio : entry - risk * RRRatio;
+
+            Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} entry~{2} SL={3} ({4:F1} pips) TP={5} (RR 1:{6}). M5 EG [{7}..{8}] from {9:HH:mm}. (dry run - no order)",
+                tradeType, barTime, entry, slPrice, slPips, tpPrice, RRRatio, eg.Low, eg.High, eg.BarTime);
+        }
+
         /// <summary>
         /// True if the completed bar at <paramref name="index"/> is a bullish engulfing.
         /// Callers must pass an index of a COMPLETED bar (at most series.Count - 2 when
@@ -317,6 +508,8 @@ namespace cAlgo.Robots
 
         protected override void OnStop()
         {
+            if (_m1Bars != null)
+                _m1Bars.BarOpened -= OnM1BarOpened;
             Print("Stopped.");
         }
     }
