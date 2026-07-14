@@ -63,6 +63,10 @@ namespace cAlgo.Robots
         [Parameter("Debug: Log EG Scan On Start", Group = "Debug", DefaultValue = true)]
         public bool DebugScanOnStart { get; set; }
 
+        // Step 5 mode: log fully-formed signals but place no orders.
+        [Parameter("Debug: Dry Run (no orders)", Group = "Debug", DefaultValue = false)]
+        public bool DryRun { get; set; }
+
         private const string Label = "GoldEngulfingConfluence";
 
         // Cached in OnStart per hard rule #4 - never call MarketData.GetBars in OnBar.
@@ -119,6 +123,11 @@ namespace cAlgo.Robots
 
         // Open time of the last completed M1 bar we evaluated (process each M1 bar once).
         private System.DateTime _lastM1Evaluated = System.DateTime.MinValue;
+
+        // Step 6: daily trade counter, keyed to the signal bar's DATE (hard rule #6:
+        // reset on date change).
+        private System.DateTime _tradeCountDate = System.DateTime.MinValue;
+        private int _tradesToday;
 
         protected override void OnStart()
         {
@@ -398,8 +407,9 @@ namespace cAlgo.Robots
         }
 
         /// <summary>
-        /// Step 5: log the fully-formed signal with the SL/TP it would use - no orders yet.
-        /// The M5 EG that produced the signal is consumed (one signal per confirmation).
+        /// Steps 5+6: validate the fully-formed signal (session, SL cap, daily limit) and
+        /// execute it - or just log it when DryRun is on. The M5 EG that produced the
+        /// signal is consumed either way (one signal per confirmation).
         /// </summary>
         private void RaiseSignal(TradeType tradeType, int m1Index, System.DateTime barTime)
         {
@@ -441,9 +451,52 @@ namespace cAlgo.Robots
 
             double risk = slPips * Symbol.PipSize;
             double tpPrice = isBuy ? entry + risk * RRRatio : entry - risk * RRRatio;
+            double tpPips = slPips * RRRatio;
 
-            Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} entry~{2} SL={3} ({4:F1} pips) TP={5} (RR 1:{6}). M5 EG [{7}..{8}] from {9:HH:mm}. (dry run - no order)",
-                tradeType, barTime, entry, slPrice, slPips, tpPrice, RRRatio, eg.Low, eg.High, eg.BarTime);
+            // Hard rule #6: counter keyed to the signal bar's date, reset when it changes.
+            if (barTime.Date != _tradeCountDate)
+            {
+                if (_tradeCountDate != System.DateTime.MinValue)
+                    Print("[LIMIT] new day {0:yyyy-MM-dd}: daily trade counter reset (was {1}).", barTime.Date, _tradesToday);
+                _tradeCountDate = barTime.Date;
+                _tradesToday = 0;
+            }
+            if (_tradesToday >= DailyTradeLimit)
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} SKIPPED: daily trade limit {2} reached.",
+                    tradeType, barTime, DailyTradeLimit);
+                return;
+            }
+
+            if (DryRun)
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} entry~{2} SL={3} ({4:F1} pips) TP={5} (RR 1:{6}). M5 EG [{7}..{8}] from {9:HH:mm}. (dry run - no order)",
+                    tradeType, barTime, entry, slPrice, slPips, tpPrice, RRRatio, eg.Low, eg.High, eg.BarTime);
+                return;
+            }
+
+            // LotSize (lots) -> units, clamped to the symbol's tradable volume constraints.
+            double volumeUnits = Symbol.NormalizeVolumeInUnits(Symbol.QuantityToVolumeInUnits(LotSize), RoundingMode.Down);
+            if (volumeUnits < Symbol.VolumeInUnitsMin)
+            {
+                Print("[SIGNAL {0}] {1:yyyy-MM-dd HH:mm} REJECTED: LotSize {2} -> {3} units is below symbol minimum {4}.",
+                    tradeType, barTime, LotSize, volumeUnits, Symbol.VolumeInUnitsMin);
+                return;
+            }
+
+            // SL/TP are PIP DISTANCES in this overload (verified against cAlgo.API.xml),
+            // applied relative to the actual fill price.
+            var result = ExecuteMarketOrder(tradeType, SymbolName, volumeUnits, Label, slPips, tpPips);
+            if (!result.IsSuccessful)
+            {
+                Print("[ORDER {0}] {1:yyyy-MM-dd HH:mm} FAILED: {2}", tradeType, barTime, result.Error);
+                return;
+            }
+
+            _tradesToday++;
+            var pos = result.Position;
+            Print("[ORDER {0}] {1:yyyy-MM-dd HH:mm} filled #{2}: entry {3} SL {4} TP {5}, {6} units. Trade {7}/{8} today.",
+                tradeType, barTime, pos.Id, pos.EntryPrice, pos.StopLoss, pos.TakeProfit, pos.VolumeInUnits, _tradesToday, DailyTradeLimit);
         }
 
         /// <summary>
