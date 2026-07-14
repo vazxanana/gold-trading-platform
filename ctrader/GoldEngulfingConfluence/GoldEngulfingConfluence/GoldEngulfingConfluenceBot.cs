@@ -69,6 +69,25 @@ namespace cAlgo.Robots
         private Bars _m15Bars;
         private Bars _m1Bars;
 
+        /// <summary>
+        /// A price zone anchored to the bar (of its own timeframe) that created it.
+        /// Expires after ZoneExpiryBars bars of that same timeframe.
+        /// </summary>
+        private sealed class Zone
+        {
+            public double Low;
+            public double High;
+            public int BarIndex;          // index in its own Bars series
+            public System.DateTime BarTime;
+        }
+
+        // M15 zones, one slot per direction; a newer M15 engulfing replaces the old zone.
+        private Zone _m15BullZone;
+        private Zone _m15BearZone;
+
+        // Open time of the last M15 completed bar we evaluated, so each M15 bar is processed once.
+        private System.DateTime _lastM15Evaluated = System.DateTime.MinValue;
+
         protected override void OnStart()
         {
             // Hard rule #1: this bot's state machine is driven by the M5 chart it is attached to.
@@ -96,7 +115,76 @@ namespace cAlgo.Robots
 
         protected override void OnBar()
         {
-            // Steps 3-6 build the state machine here.
+            // Called when a new M5 bar OPENS; Bars.Count - 2 is the just-completed M5 bar.
+            ProcessM15Zones();
+        }
+
+        private bool DirectionAllows(TradeType tradeType)
+        {
+            return TradeDirection == TradeDirectionMode.Both
+                || (TradeDirection == TradeDirectionMode.Buy && tradeType == TradeType.Buy)
+                || (TradeDirection == TradeDirectionMode.Sell && tradeType == TradeType.Sell);
+        }
+
+        /// <summary>
+        /// Step 3: whenever a new M15 bar has completed, expire stale zones, then look for a
+        /// fresh M15 engulfing and record its low/high as the zone for that direction.
+        /// </summary>
+        private void ProcessM15Zones()
+        {
+            int last = _m15Bars.Count - 2; // last COMPLETED M15 bar (hard rule #2)
+            if (last < 1)
+                return;
+
+            var lastOpenTime = _m15Bars.OpenTimes[last];
+            if (lastOpenTime == _lastM15Evaluated)
+                return; // no new completed M15 bar since the previous M5 OnBar
+            _lastM15Evaluated = lastOpenTime;
+
+            // Expiry: a zone lives ZoneExpiryBars M15 bars after the bar that created it.
+            if (_m15BullZone != null && last - _m15BullZone.BarIndex >= ZoneExpiryBars)
+            {
+                Print("[M15-ZONE] BULL zone from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M15 bars.",
+                    _m15BullZone.BarTime, _m15BullZone.Low, _m15BullZone.High, ZoneExpiryBars);
+                _m15BullZone = null;
+            }
+            if (_m15BearZone != null && last - _m15BearZone.BarIndex >= ZoneExpiryBars)
+            {
+                Print("[M15-ZONE] BEAR zone from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M15 bars.",
+                    _m15BearZone.BarTime, _m15BearZone.Low, _m15BearZone.High, ZoneExpiryBars);
+                _m15BearZone = null;
+            }
+
+            // Creation: the completed M15 bar's low/high becomes "the M15 zone".
+            if (DirectionAllows(TradeType.Buy) && IsBullishEngulfing(_m15Bars, last))
+            {
+                if (_m15BullZone != null)
+                    Print("[M15-ZONE] BULL zone from {0:yyyy-MM-dd HH:mm} replaced by newer engulfing.", _m15BullZone.BarTime);
+                _m15BullZone = new Zone
+                {
+                    Low = _m15Bars.LowPrices[last],
+                    High = _m15Bars.HighPrices[last],
+                    BarIndex = last,
+                    BarTime = lastOpenTime
+                };
+                Print("[M15-ZONE] BULL engulfing {0:yyyy-MM-dd HH:mm} -> zone [{1}..{2}], valid {3} M15 bars.",
+                    lastOpenTime, _m15BullZone.Low, _m15BullZone.High, ZoneExpiryBars);
+            }
+
+            if (DirectionAllows(TradeType.Sell) && IsBearishEngulfing(_m15Bars, last))
+            {
+                if (_m15BearZone != null)
+                    Print("[M15-ZONE] BEAR zone from {0:yyyy-MM-dd HH:mm} replaced by newer engulfing.", _m15BearZone.BarTime);
+                _m15BearZone = new Zone
+                {
+                    Low = _m15Bars.LowPrices[last],
+                    High = _m15Bars.HighPrices[last],
+                    BarIndex = last,
+                    BarTime = lastOpenTime
+                };
+                Print("[M15-ZONE] BEAR engulfing {0:yyyy-MM-dd HH:mm} -> zone [{1}..{2}], valid {3} M15 bars.",
+                    lastOpenTime, _m15BearZone.Low, _m15BearZone.High, ZoneExpiryBars);
+            }
         }
 
         /// <summary>
