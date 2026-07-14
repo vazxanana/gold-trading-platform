@@ -88,6 +88,11 @@ namespace cAlgo.Robots
         // Open time of the last M15 completed bar we evaluated, so each M15 bar is processed once.
         private System.DateTime _lastM15Evaluated = System.DateTime.MinValue;
 
+        // M5 engulfing confirmations (step 4): set when an M5 engulfing closes inside the
+        // matching M15 zone; expire after ZoneExpiryBars M5 bars.
+        private Zone _m5BullEg;
+        private Zone _m5BearEg;
+
         protected override void OnStart()
         {
             // Hard rule #1: this bot's state machine is driven by the M5 chart it is attached to.
@@ -117,6 +122,69 @@ namespace cAlgo.Robots
         {
             // Called when a new M5 bar OPENS; Bars.Count - 2 is the just-completed M5 bar.
             ProcessM15Zones();
+            ProcessM5Confluence();
+        }
+
+        /// <summary>
+        /// Step 4: an M5 engulfing whose CLOSE falls inside the matching M15 zone becomes
+        /// the M5 EG reference (its low/high recorded). The M15 zone stays active - it is
+        /// not consumed - so a later M5 engulfing can re-confirm and replace the reference.
+        /// </summary>
+        private void ProcessM5Confluence()
+        {
+            int last = Bars.Count - 2; // just-completed M5 bar (hard rule #2)
+            if (last < 1)
+                return;
+
+            // Expiry: the M5 EG reference lives ZoneExpiryBars M5 bars.
+            if (_m5BullEg != null && last - _m5BullEg.BarIndex >= ZoneExpiryBars)
+            {
+                Print("[M5-EG] BULL EG from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M5 bars.",
+                    _m5BullEg.BarTime, _m5BullEg.Low, _m5BullEg.High, ZoneExpiryBars);
+                _m5BullEg = null;
+            }
+            if (_m5BearEg != null && last - _m5BearEg.BarIndex >= ZoneExpiryBars)
+            {
+                Print("[M5-EG] BEAR EG from {0:yyyy-MM-dd HH:mm} [{1}..{2}] EXPIRED after {3} M5 bars.",
+                    _m5BearEg.BarTime, _m5BearEg.Low, _m5BearEg.High, ZoneExpiryBars);
+                _m5BearEg = null;
+            }
+
+            double lastClose = Bars.ClosePrices[last];
+
+            if (_m15BullZone != null && DirectionAllows(TradeType.Buy)
+                && IsBullishEngulfing(Bars, last)
+                && lastClose >= _m15BullZone.Low && lastClose <= _m15BullZone.High)
+            {
+                if (_m5BullEg != null)
+                    Print("[M5-EG] BULL EG from {0:yyyy-MM-dd HH:mm} replaced by newer confirmation.", _m5BullEg.BarTime);
+                _m5BullEg = new Zone
+                {
+                    Low = Bars.LowPrices[last],
+                    High = Bars.HighPrices[last],
+                    BarIndex = last,
+                    BarTime = Bars.OpenTimes[last]
+                };
+                Print("[M5-EG] BULL confluence {0:yyyy-MM-dd HH:mm}: M5 EG close {1} inside M15 zone [{2}..{3}] -> EG ref [{4}..{5}], valid {6} M5 bars.",
+                    _m5BullEg.BarTime, lastClose, _m15BullZone.Low, _m15BullZone.High, _m5BullEg.Low, _m5BullEg.High, ZoneExpiryBars);
+            }
+
+            if (_m15BearZone != null && DirectionAllows(TradeType.Sell)
+                && IsBearishEngulfing(Bars, last)
+                && lastClose >= _m15BearZone.Low && lastClose <= _m15BearZone.High)
+            {
+                if (_m5BearEg != null)
+                    Print("[M5-EG] BEAR EG from {0:yyyy-MM-dd HH:mm} replaced by newer confirmation.", _m5BearEg.BarTime);
+                _m5BearEg = new Zone
+                {
+                    Low = Bars.LowPrices[last],
+                    High = Bars.HighPrices[last],
+                    BarIndex = last,
+                    BarTime = Bars.OpenTimes[last]
+                };
+                Print("[M5-EG] BEAR confluence {0:yyyy-MM-dd HH:mm}: M5 EG close {1} inside M15 zone [{2}..{3}] -> EG ref [{4}..{5}], valid {6} M5 bars.",
+                    _m5BearEg.BarTime, lastClose, _m15BearZone.Low, _m15BearZone.High, _m5BearEg.Low, _m5BearEg.High, ZoneExpiryBars);
+            }
         }
 
         private bool DirectionAllows(TradeType tradeType)
