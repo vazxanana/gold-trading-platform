@@ -6,3 +6,10 @@ node_modules/
 
 .vercel
 .env*
+
+# .NET / cTrader build output
+ctrader/**/bin/
+ctrader/**/obj/
+
+# cTrader publish copy created by SDK build on non-Windows
+ctrader/**/cAlgo/
