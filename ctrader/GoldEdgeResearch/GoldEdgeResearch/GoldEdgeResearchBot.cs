@@ -18,7 +18,7 @@ namespace cAlgo.Robots
     /// t-statistic holds up. The final summary ranks hypotheses by min(|t_IS|, |t_OOS|),
     /// zeroed when the windows disagree.
     ///
-    /// Multiple-testing warning: ~50 rows are tested, so ~2-3 will show |t| >= 2 by pure
+    /// Multiple-testing warning: ~75 rows are tested, so ~3-4 will show |t| >= 2 by pure
     /// luck. That is exactly why the OOS column exists - demand agreement, not one number.
     ///
     /// Usage: backtest on XAUUSD (any timeframe/period - it loads its own H1/D1/M15
@@ -38,6 +38,10 @@ namespace cAlgo.Robots
 
         [Parameter("Out-of-sample fraction", DefaultValue = 0.3, MinValue = 0.1, MaxValue = 0.5)]
         public double OosFraction { get; set; }
+
+        // For the gold/silver ratio section; section is skipped if the symbol is missing.
+        [Parameter("Silver Symbol", DefaultValue = "XAGUSD")]
+        public string SilverSymbol { get; set; }
 
         // Same definitions as EngulfingLogic in GoldEngulfingConfluenceBot.cs (spec, exact):
         //   bullish: close > prior_open AND open <= prior_close AND close > open
@@ -114,6 +118,10 @@ namespace cAlgo.Robots
             Breakouts(d1);
             BigMoveAndGaps(d1);
             EngulfingFollowThrough(m15, DailyTrendMap(d1));
+            MonthOfYear(d1);
+            VolRegime(d1, m15);
+            NfpFriday(h1);
+            GoldSilverRatio(d1);
 
             PrintTables();
             PrintSummary();
@@ -309,6 +317,160 @@ namespace cAlgo.Robots
             }
         }
 
+        /// Documented physical-demand seasonality: strong Jan and Aug-Sep (Indian festival
+        /// and wedding restocking, Chinese New Year buying), weak Mar/Jun.
+        private void MonthOfYear(Bars d1)
+        {
+            for (int i = 1; i <= d1.Count - 2; i++)
+                Collect("9. Month-of-year", d1.OpenTimes[i].ToString("MMM"), RetBp(d1, i));
+        }
+
+        /// Vol clustering as a FILTER: does the next day - and does the engulfing pattern -
+        /// behave differently when ATR14 is above vs below its trailing-100-day median?
+        /// Regime uses only completed data (no look-ahead).
+        private void VolRegime(Bars d1, Bars m15)
+        {
+            int n = d1.Count;
+            if (n < 140) return;
+
+            // ATR14 as a simple SMA of true range
+            var atr = new double[n];
+            var trArr = new double[n];
+            for (int i = 1; i < n; i++)
+                trArr[i] = Math.Max(d1.HighPrices[i] - d1.LowPrices[i],
+                           Math.Max(Math.Abs(d1.HighPrices[i] - d1.ClosePrices[i - 1]),
+                                    Math.Abs(d1.LowPrices[i] - d1.ClosePrices[i - 1])));
+            for (int i = 15; i < n; i++)
+            {
+                double s = 0;
+                for (int k = i - 13; k <= i; k++) s += trArr[k];
+                atr[i] = s / 14;
+            }
+
+            var highVolByDate = new Dictionary<System.DateTime, bool>();
+            for (int i = 130; i <= n - 2; i++)
+            {
+                // regime known at day i's open: yesterday's ATR vs the 100 before it
+                double y = atr[i - 1];
+                int below = 0, cnt = 0;
+                for (int k = i - 101; k < i - 1; k++)
+                {
+                    if (atr[k] <= 0) continue;
+                    cnt++;
+                    if (atr[k] < y) below++;
+                }
+                if (cnt < 60) continue;
+                bool high = below > cnt / 2;
+                highVolByDate[d1.OpenTimes[i].Date] = high;
+                Collect("10. Vol regime (ATR14 vs trailing median)",
+                    high ? "next day in HIGH-vol regime" : "next day in LOW-vol regime", RetBp(d1, i));
+            }
+
+            // Condition the strategy's pattern on the regime (strict definition, fwd 1h).
+            const string sec = "10. Vol regime (ATR14 vs trailing median)";
+            for (int i = 1; i <= m15.Count - 6; i++)
+            {
+                bool up;
+                if (!highVolByDate.TryGetValue(m15.OpenTimes[i].Date, out up)) continue;
+                double fwd = 10000.0 * Math.Log(m15.ClosePrices[i + 4] / m15.ClosePrices[i]);
+                bool priorRed = m15.ClosePrices[i - 1] < m15.OpenPrices[i - 1];
+                bool priorGreen = m15.ClosePrices[i - 1] > m15.OpenPrices[i - 1];
+                if (priorRed && IsBullishEg(m15.OpenPrices[i - 1], m15.ClosePrices[i - 1], m15.OpenPrices[i], m15.ClosePrices[i]))
+                    Collect(sec, up ? "strict bull EG, HIGH vol" : "strict bull EG, LOW vol", fwd);
+                if (priorGreen && IsBearishEg(m15.OpenPrices[i - 1], m15.ClosePrices[i - 1], m15.OpenPrices[i], m15.ClosePrices[i]))
+                    Collect(sec, up ? "strict bear EG, HIGH vol (short)" : "strict bear EG, LOW vol (short)", -fwd);
+            }
+        }
+
+        /// Crude NFP test: first Friday of the month; 8:30 ET release falls in the 12:00 or
+        /// 13:00 UTC bar depending on DST, so the event window is 12-14 UTC and the
+        /// follow-through window 14-16 UTC, signed by the event move's direction.
+        /// No economic calendar involved - schedule exceptions add noise; treat as rough.
+        private void NfpFriday(Bars h1)
+        {
+            var day = System.DateTime.MinValue;
+            double evt = 0, post = 0; bool active = false;
+            for (int i = 1; i <= h1.Count - 2; i++)
+            {
+                var t = h1.OpenTimes[i];
+                if (t.Date != day)
+                {
+                    if (active)
+                    {
+                        Collect("11. NFP Friday (crude, no calendar)", "event window 12-14 UTC", evt);
+                        if (Math.Abs(evt) > 0)
+                            Collect("11. NFP Friday (crude, no calendar)", "follow event move, 14-16 UTC", Math.Sign(evt) * post);
+                    }
+                    day = t.Date; evt = 0; post = 0;
+                    active = t.DayOfWeek == DayOfWeek.Friday && t.Day <= 7;
+                }
+                if (!active) continue;
+                if (t.Hour >= 12 && t.Hour < 14) evt += RetBp(h1, i);
+                if (t.Hour >= 14 && t.Hour < 16) post += RetBp(h1, i);
+            }
+            if (active)
+            {
+                Collect("11. NFP Friday (crude, no calendar)", "event window 12-14 UTC", evt);
+                if (Math.Abs(evt) > 0)
+                    Collect("11. NFP Friday (crude, no calendar)", "follow event move, 14-16 UTC", Math.Sign(evt) * post);
+            }
+        }
+
+        /// Gold/silver ratio extremes: when the ratio is in the top/bottom 15% of its
+        /// trailing 250 days, does GOLD's next-day return differ? (We only trade gold here;
+        /// the classic trade is the ratio itself.) Skipped if the silver symbol is missing.
+        private void GoldSilverRatio(Bars d1)
+        {
+            Bars xag = null;
+            try
+            {
+                xag = MarketData.GetBars(TimeFrame.Daily, SilverSymbol);
+                for (int guard = 0; xag.Count < TargetD1 && guard < 60; guard++)
+                    if (xag.LoadMoreHistory() <= 0)
+                        break;
+            }
+            catch (Exception e)
+            {
+                Print("12. Gold/silver ratio: SKIPPED ({0} not available: {1})", SilverSymbol, e.Message);
+                return;
+            }
+            if (xag == null || xag.Count < 300)
+            {
+                Print("12. Gold/silver ratio: SKIPPED (insufficient {0} history)", SilverSymbol);
+                return;
+            }
+
+            var silverClose = new Dictionary<System.DateTime, double>();
+            for (int i = 0; i < xag.Count; i++)
+                silverClose[xag.OpenTimes[i].Date] = xag.ClosePrices[i];
+
+            // ratio[i] = ratio at day i's CLOSE; decisions for day i use ratio[i-1]
+            var ratio = new double[d1.Count];
+            for (int i = 0; i < d1.Count; i++)
+            {
+                double s;
+                ratio[i] = silverClose.TryGetValue(d1.OpenTimes[i].Date, out s) && s > 0
+                    ? d1.ClosePrices[i] / s : 0;
+            }
+
+            for (int i = 260; i <= d1.Count - 2; i++)
+            {
+                double y = ratio[i - 1];
+                if (y <= 0) continue;
+                int below = 0, cnt = 0;
+                for (int k = i - 251; k < i - 1; k++)
+                {
+                    if (ratio[k] <= 0) continue;
+                    cnt++;
+                    if (ratio[k] < y) below++;
+                }
+                if (cnt < 200) continue;
+                double pct = (double)below / cnt;
+                if (pct >= 0.85) Collect("12. Gold/silver ratio (trailing 250d)", "gold next day, ratio > p85", RetBp(d1, i));
+                else if (pct <= 0.15) Collect("12. Gold/silver ratio (trailing 250d)", "gold next day, ratio < p15", RetBp(d1, i));
+            }
+        }
+
         // ---- reporting -------------------------------------------------------------------
 
         private KeyValuePair<Split, Split> SplitTrack(Track tr)
@@ -378,7 +540,7 @@ namespace cAlgo.Robots
                 Print("  {0}. [{1}] {2}: IS {3:+0.0;-0.0}bp (t={4:F1}), OOS {5:+0.0;-0.0}bp (t={6:F1}), n={7}",
                     r + 1, tr.Section, tr.Label, s.Key.Mean, s.Key.T, s.Value.Mean, s.Value.T, tr.Ret.Count);
             }
-            Print("  Reminder: ~50 hypotheses tested -> a couple of |t|>=2 rows are expected by luck alone.");
+            Print("  Reminder: ~75 hypotheses tested -> a few |t|>=2 rows are expected by luck alone.");
             Print("  Trust a finding only if it is a ** CANDIDATE **, makes economic sense, and survives");
             Print("  a paper-traded or later-period retest.");
         }
