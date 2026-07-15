@@ -50,16 +50,25 @@ namespace cAlgo.Robots
         public double LotSize { get; set; }
 
         // Disaster cap, not a managed stop: wide on purpose so normal noise never hits it.
-        [Parameter("Emergency SL (pips)", Group = "Risk", DefaultValue = 300, MinValue = 50)]
-        public double EmergencySlPips { get; set; }
+        // Denominated in USD price distance because brokers disagree on what a XAUUSD
+        // "pip" is ($0.10 vs $0.01); converted via Symbol.PipSize at runtime.
+        [Parameter("Emergency SL (USD)", Group = "Risk", DefaultValue = 30.0, MinValue = 5.0)]
+        public double EmergencySlUsd { get; set; }
 
         // Stop opening new trades for the rest of the week after losing this % of the
         // balance the week started with.
         [Parameter("Weekly Loss Cap (%)", Group = "Risk", DefaultValue = 3.0, MinValue = 0.5, Step = 0.5)]
         public double MaxWeeklyLossPercent { get; set; }
 
+        // Entry WINDOW, not a single hour: in US summer time the market halt moves and the
+        // 21:00 UTC H1 bar does not exist, so a fixed hour silently skips 8 months a year.
+        // The bot enters on the FIRST bar whose hour falls in [EntryHourUtc, +WindowHours),
+        // once per day: 21:00 in winter, 22:00 (the reopen) in summer.
         [Parameter("Entry Hour (UTC)", Group = "Timing", DefaultValue = 21, MinValue = 0, MaxValue = 23)]
         public int EntryHourUtc { get; set; }
+
+        [Parameter("Entry Window (hours)", Group = "Timing", DefaultValue = 3, MinValue = 1, MaxValue = 6)]
+        public int EntryWindowHours { get; set; }
 
         [Parameter("Exit Hour (UTC)", Group = "Timing", DefaultValue = 0, MinValue = 0, MaxValue = 23)]
         public int ExitHourUtc { get; set; }
@@ -68,9 +77,9 @@ namespace cAlgo.Robots
         [Parameter("Max Hold (hours)", Group = "Timing", DefaultValue = 30, MinValue = 2)]
         public int MaxHoldHours { get; set; }
 
-        // Rollover-spread guard: skip the entry when the live spread exceeds this.
-        [Parameter("Max Entry Spread (pips)", Group = "Filters", DefaultValue = 6, MinValue = 1)]
-        public double MaxEntrySpreadPips { get; set; }
+        // Rollover-spread guard: skip the entry when the live spread exceeds this (USD).
+        [Parameter("Max Entry Spread (USD)", Group = "Filters", DefaultValue = 0.60, MinValue = 0.05, Step = 0.05)]
+        public double MaxEntrySpreadUsd { get; set; }
 
         [Parameter("Only After Down Day", Group = "Filters", DefaultValue = false)]
         public bool OnlyAfterDownDay { get; set; }
@@ -85,6 +94,7 @@ namespace cAlgo.Robots
         private const string Label = "GoldCloseDrift";
 
         private Bars _daily;                       // cached once in OnStart
+        private System.DateTime _lastEntryDate = System.DateTime.MinValue;
         private System.DateTime _weekAnchor = System.DateTime.MinValue;
         private double _weekStartBalance;
         private bool _weeklyCapTripped;
@@ -100,11 +110,12 @@ namespace cAlgo.Robots
 
             _daily = MarketData.GetBars(TimeFrame.Daily);
 
-            Print("Started on {0} H1 ({1} account). Entry {2}:00 -> exit {3}:00 UTC. Sizing={4} ({5}), " +
-                  "spread guard {6} pips, weekly cap {7}%, downDayFilter={8}.",
-                SymbolName, Account.IsLive ? "LIVE" : "demo", EntryHourUtc, ExitHourUtc,
+            Print("Started on {0} H1 ({1} account). Entry window {2}:00+{3}h -> exit {4}:00 UTC. Sizing={5} ({6}), " +
+                  "SL ${7} = {8:F0} broker pips (PipSize {9}), spread guard ${10}, weekly cap {11}%, downDayFilter={12}.",
+                SymbolName, Account.IsLive ? "LIVE" : "demo", EntryHourUtc, EntryWindowHours, ExitHourUtc,
                 Sizing, Sizing == SizingMode.RiskPercent ? RiskPercent + "%" : LotSize + " lots",
-                MaxEntrySpreadPips, MaxWeeklyLossPercent, OnlyAfterDownDay);
+                EmergencySlUsd, EmergencySlUsd / Symbol.PipSize, Symbol.PipSize, MaxEntrySpreadUsd,
+                MaxWeeklyLossPercent, OnlyAfterDownDay);
         }
 
         protected override void OnBar()
@@ -153,8 +164,11 @@ namespace cAlgo.Robots
 
         private void TryEnter(System.DateTime nowOpen)
         {
-            if (nowOpen.Hour != EntryHourUtc)
+            int hoursIntoWindow = (nowOpen.Hour - EntryHourUtc + 24) % 24;
+            if (hoursIntoWindow >= EntryWindowHours)
                 return;
+            if (_lastEntryDate == nowOpen.Date)
+                return; // one entry per day, even when the window's first bar is missing
             if (Positions.Find(Label, SymbolName, TradeType.Buy) != null)
                 return;
 
@@ -173,11 +187,11 @@ namespace cAlgo.Robots
                 return;
 
             // Rollover-spread guard - the make-or-break filter for this edge.
-            double spreadPips = Symbol.Spread / Symbol.PipSize;
-            if (spreadPips > MaxEntrySpreadPips)
+            // Symbol.Spread is already in price units (USD for XAUUSD).
+            if (Symbol.Spread > MaxEntrySpreadUsd)
             {
-                Print("[SKIP] {0:yyyy-MM-dd HH:mm} spread {1:F1} pips > {2} (rollover widening).",
-                    nowOpen, spreadPips, MaxEntrySpreadPips);
+                Print("[SKIP] {0:yyyy-MM-dd HH:mm} spread ${1:F2} > ${2:F2} (rollover widening).",
+                    nowOpen, Symbol.Spread, MaxEntrySpreadUsd);
                 return;
             }
 
@@ -196,10 +210,14 @@ namespace cAlgo.Robots
                 return;
             }
 
-            var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volumeUnits, Label, EmergencySlPips, null);
+            double slPips = EmergencySlUsd / Symbol.PipSize;
+            var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volumeUnits, Label, slPips, null);
             if (result.IsSuccessful)
-                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} long #{1} at {2}, {3} units, SL {4} pips, spread {5:F1}p, exit {6}:00 UTC.",
-                    nowOpen, result.Position.Id, result.Position.EntryPrice, volumeUnits, EmergencySlPips, spreadPips, ExitHourUtc);
+            {
+                _lastEntryDate = nowOpen.Date;
+                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} long #{1} at {2}, {3} units, SL ${4} ({5:F0} pips), spread ${6:F2}, exit {7}:00 UTC.",
+                    nowOpen, result.Position.Id, result.Position.EntryPrice, volumeUnits, EmergencySlUsd, slPips, Symbol.Spread, ExitHourUtc);
+            }
             else
                 Print("[ENTRY] {0:yyyy-MM-dd HH:mm} FAILED: {1}", nowOpen, result.Error);
         }
@@ -215,7 +233,7 @@ namespace cAlgo.Robots
             {
                 // PipValue is per unit of volume: units = risk money / (SL pips * pip value).
                 double riskMoney = Account.Balance * RiskPercent / 100.0;
-                raw = riskMoney / (EmergencySlPips * Symbol.PipValue);
+                raw = riskMoney / ((EmergencySlUsd / Symbol.PipSize) * Symbol.PipValue);
             }
 
             if (nowOpen.DayOfWeek == System.DayOfWeek.Thursday)
