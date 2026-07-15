@@ -487,7 +487,8 @@ namespace cAlgo.Robots
             foreach (var key in _order)
             {
                 var tr = _tracks[key];
-                if (tr.Ret.Count < 30) continue; // too small to say anything
+                if (tr.Ret.Count < 20) continue; // below this there is nothing to say at all
+                                                 // (20-59 samples still print but rank as "thin")
                 if (tr.Section != section)
                 {
                     section = tr.Section;
