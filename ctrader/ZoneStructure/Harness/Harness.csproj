@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <!-- Not a cBot: plain console app that links the bot's single source file. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../ZoneStructure/ZoneStructureBot.cs" Link="ZoneStructureBot.cs" />
+    <!-- Compile-only reference to cAlgo.API so the Robot class in the linked file builds;
+         build/buildTransitive assets excluded so the .algo packaging targets don't apply. -->
+    <PackageReference Include="cTrader.Automate" Version="1.0.17" ExcludeAssets="build;buildTransitive" />
+  </ItemGroup>
+
+</Project>
