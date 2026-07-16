@@ -82,12 +82,23 @@ namespace cAlgo.Robots
         [Parameter("Max Entry Spread (USD)", Group = "Risk", DefaultValue = 0.60, MinValue = 0.01, Step = 0.05)]
         public double MaxEntrySpreadUsd { get; set; }
 
+        // Diagnostics: logs WHY bars produce no signal (RSI never extreme, candle
+        // pattern missing, or both) plus a daily RSI summary - turn on when the bot
+        // seems idle, read the log, then turn off.
+        [Parameter("Debug: Log Signal Diagnostics", Group = "Debug", DefaultValue = true)]
+        public bool DebugDiagnostics { get; set; }
+
         private const string Label = "RsiReversal";
 
         private RelativeStrengthIndex _rsi;
         private AverageTrueRange _atr;
         private System.DateTime _tradeCountDate = System.DateTime.MinValue;
         private int _tradesToday;
+
+        // diagnostics accumulators
+        private System.DateTime _diagDate = System.DateTime.MinValue;
+        private int _diagBars, _diagCandleOnly, _diagRsiOnly;
+        private double _diagRsiMin = 100, _diagRsiMax;
 
         protected override void OnStart()
         {
@@ -125,6 +136,9 @@ namespace cAlgo.Robots
                 if (v <= RsiOversold) wasOversold = true;
                 if (v >= RsiOverbought) wasOverbought = true;
             }
+
+            if (DebugDiagnostics)
+                Diagnose(i, bullishCandle, bearishCandle, wasOversold, wasOverbought);
 
             bool buySignal = wasOversold && bullishCandle
                 && (TradeDirection == TradeDirectionMode.Both || TradeDirection == TradeDirectionMode.Buy);
@@ -181,6 +195,29 @@ namespace cAlgo.Robots
             }
             else
                 Print("[ENTRY] {0:yyyy-MM-dd HH:mm} {1} FAILED: {2}", barTime, tradeType, result.Error);
+        }
+
+        /// <summary>
+        /// Once per day, prints how many completed bars had the candle pattern without
+        /// the RSI extreme (and vice versa) and the day's RSI range - so an idle bot
+        /// explains itself. A day where RSI never leaves 40-60 cannot produce signals.
+        /// </summary>
+        private void Diagnose(int i, bool bullC, bool bearC, bool os, bool ob)
+        {
+            var d = Bars.OpenTimes[i].Date;
+            if (d != _diagDate)
+            {
+                if (_diagDate != System.DateTime.MinValue)
+                    Print("[DIAG {0:yyyy-MM-dd}] {1} bars: candle-no-RSI {2}, RSI-no-candle {3}, RSI range {4:F0}..{5:F0} (need <={6} or >={7}).",
+                        _diagDate, _diagBars, _diagCandleOnly, _diagRsiOnly, _diagRsiMin, _diagRsiMax, RsiOversold, RsiOverbought);
+                _diagDate = d; _diagBars = 0; _diagCandleOnly = 0; _diagRsiOnly = 0; _diagRsiMin = 100; _diagRsiMax = 0;
+            }
+            _diagBars++;
+            double rsiNow = _rsi.Result[i];
+            if (rsiNow < _diagRsiMin) _diagRsiMin = rsiNow;
+            if (rsiNow > _diagRsiMax) _diagRsiMax = rsiNow;
+            if ((bullC && !os) || (bearC && !ob)) _diagCandleOnly++;
+            if ((os && !bullC) || (ob && !bearC)) _diagRsiOnly++;
         }
 
         private void ApplyTimeStop()
