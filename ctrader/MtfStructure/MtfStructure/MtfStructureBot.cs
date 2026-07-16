@@ -210,6 +210,10 @@ namespace cAlgo.Robots
         private System.DateTime _tradeCountDate = System.DateTime.MinValue;
         private int _tradesToday;
 
+        // cascade diagnostics: why potential triggers were blocked (printed daily)
+        private System.DateTime _diagDate = System.DateTime.MinValue;
+        private int _diagChochToward, _diagBlockedDailyNeutral, _diagBlockedNoH4Pullback, _diagBlockedDirection;
+
         protected override void OnStart()
         {
             if (TimeFrame != TimeFrame.Minute5)
@@ -261,27 +265,67 @@ namespace cAlgo.Robots
 
             ManageStructureExit(m15Break, m15Choch, m5Break, m5Choch);
 
+            if (DebugStructure)
+                DailyDiag();
+
             int dailyTrend = _daily.Trend;
-            if (dailyTrend == 0)
+
+            // is there a candidate lower-TF CHoCH event at all this bar?
+            int entryBreak = EntryTf == EntryTimeframeMode.M15 ? m15Break : m5Break;
+            bool entryChoch = EntryTf == EntryTimeframeMode.M15 ? m15Choch : m5Choch;
+            if (entryBreak == 0 || !entryChoch)
                 return;
+
+            if (dailyTrend == 0)
+            {
+                _diagBlockedDailyNeutral++;
+                return;
+            }
+            if (entryBreak != dailyTrend)
+                return; // CHoCH away from the daily trend - not our signal
+            if (EntryTf == EntryTimeframeMode.M5 && _m15.Trend != -dailyTrend)
+                return; // M5 mode requires M15 still in pullback
+
+            _diagChochToward++;
 
             // the cascade: H4 must be pulling back against the Daily trend
             bool h4Pullback = StrictH4Pullback ? _h4.Trend == -dailyTrend : _h4.Trend != dailyTrend;
             if (!h4Pullback)
+            {
+                _diagBlockedNoH4Pullback++;
+                if (DebugStructure)
+                    Print("[GATE] {0:yyyy-MM-dd HH:mm} {1} CHoCH toward D1 trend, but H4 trend={2} is not a pullback (strict={3}).",
+                        Bars.OpenTimes[Bars.Count - 1], EntryTf, _h4.Trend, StrictH4Pullback);
                 return;
-
-            // entry trigger: lower-TF CHoCH flipping back TOWARD the Daily trend
-            bool trigger;
-            if (EntryTf == EntryTimeframeMode.M15)
-                trigger = m15Choch && m15Break == dailyTrend;
-            else
-                trigger = m5Choch && m5Break == dailyTrend && _m15.Trend == -dailyTrend; // M15 still in pullback
-
-            if (!trigger)
-                return;
+            }
 
             var tradeType = dailyTrend > 0 ? TradeType.Buy : TradeType.Sell;
+            if (TradeDirection != TradeDirectionMode.Both
+                && (tradeType == TradeType.Buy) != (TradeDirection == TradeDirectionMode.Buy))
+            {
+                _diagBlockedDirection++;
+                return;
+            }
             Enter(tradeType);
+        }
+
+        /// <summary>Once per day: the state of all four trackers plus gate counters.</summary>
+        private void DailyDiag()
+        {
+            var d = Bars.OpenTimes[Bars.Count - 1].Date;
+            if (d == _diagDate)
+                return;
+            if (_diagDate != System.DateTime.MinValue)
+                Print("[DIAG {0:yyyy-MM-dd}] D1={1} H4={2} M15={3} M5={4} | CHoCH-toward-D1: {5}, blocked: dailyNeutral {6}, noH4Pullback {7}, direction {8}.",
+                    _diagDate, T(_daily), T(_h4), T(_m15), T(_m5),
+                    _diagChochToward + _diagBlockedDailyNeutral, _diagBlockedDailyNeutral, _diagBlockedNoH4Pullback, _diagBlockedDirection);
+            _diagDate = d;
+            _diagChochToward = 0; _diagBlockedDailyNeutral = 0; _diagBlockedNoH4Pullback = 0; _diagBlockedDirection = 0;
+        }
+
+        private static string T(StructureTracker tr)
+        {
+            return tr.Trend > 0 ? "UP" : tr.Trend < 0 ? "DOWN" : "flat";
         }
 
         /// <summary>RRRatio = 0 mode: opposite CHoCH on the entry TF closes the position.</summary>
