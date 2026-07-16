@@ -122,6 +122,7 @@ namespace cAlgo.Robots
             VolRegime(d1, m15);
             NfpFriday(h1);
             GoldSilverRatio(d1);
+            RoundNumberBarriers(d1);
 
             PrintTables();
             PrintSummary();
@@ -468,6 +469,27 @@ namespace cAlgo.Robots
                 double pct = (double)below / cnt;
                 if (pct >= 0.85) Collect("12. Gold/silver ratio (trailing 250d)", "gold next day, ratio > p85", RetBp(d1, i));
                 else if (pct <= 0.15) Collect("12. Gold/silver ratio (trailing 250d)", "gold next day, ratio < p15", RetBp(d1, i));
+            }
+        }
+
+        /// The one support/resistance concept with academic backing (psychological-barrier
+        /// studies on gold, e.g., Aggarwal & Lucey): does next-day behavior differ when
+        /// yesterday's close sits near a $100 multiple? "Near" = within 10% of the grid,
+        /// split by approaching from below (under resistance) vs above (over support).
+        private void RoundNumberBarriers(Bars d1)
+        {
+            const string sec = "13. Round-number barriers ($100 grid)";
+            const double grid = 100.0, nearBand = 10.0, farBand = 25.0;
+            for (int i = 2; i <= d1.Count - 2; i++)
+            {
+                double prev = d1.ClosePrices[i - 1];
+                double level = Math.Round(prev / grid) * grid;
+                double dist = prev - level; // signed: negative = just below the level
+                double next = RetBp(d1, i);
+                if (Math.Abs(dist) <= nearBand)
+                    Collect(sec, dist < 0 ? "next day, just BELOW $100 level" : "next day, just ABOVE $100 level", next);
+                else if (Math.Abs(dist) >= farBand)
+                    Collect(sec, "next day, far from level", next);
             }
         }
 

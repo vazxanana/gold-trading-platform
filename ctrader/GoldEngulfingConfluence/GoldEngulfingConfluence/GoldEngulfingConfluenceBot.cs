@@ -67,6 +67,13 @@ namespace cAlgo.Robots
         [Parameter("Debug: Dry Run (no orders)", Group = "Debug", DefaultValue = false)]
         public bool DryRun { get; set; }
 
+        // Time stop: close a position that has hit neither SL nor TP within this many
+        // M5 bars (0 = off, the validated default). Rationale: a trade that has not
+        // worked quickly usually will not; this trims the loss tail without touching
+        // winners. A/B it in backtest before enabling live.
+        [Parameter("Time Stop (M5 bars, 0=off)", Group = "Risk", DefaultValue = 0, MinValue = 0)]
+        public int TimeStopBars { get; set; }
+
         private const string Label = "GoldEngulfingConfluence";
 
         // Cached in OnStart per hard rule #4 - never call MarketData.GetBars in OnBar.
@@ -161,8 +168,28 @@ namespace cAlgo.Robots
         protected override void OnBar()
         {
             // Called when a new M5 bar OPENS; Bars.Count - 2 is the just-completed M5 bar.
+            ApplyTimeStop();
             ProcessM15Zones();
             ProcessM5Confluence();
+        }
+
+        /// Optional time stop: exits any position of ours older than TimeStopBars M5 bars.
+        private void ApplyTimeStop()
+        {
+            if (TimeStopBars <= 0)
+                return;
+            var nowOpen = Bars.OpenTimes[Bars.Count - 1]; // fixed at open; OHLC never read
+            foreach (var pos in Positions.FindAll(Label, SymbolName))
+            {
+                if ((nowOpen - pos.EntryTime).TotalMinutes < TimeStopBars * 5)
+                    continue;
+                var r = ClosePosition(pos);
+                if (r.IsSuccessful)
+                    Print("[TIME-STOP] closed #{0} after {1} M5 bars: net {2} ({3} pips).",
+                        pos.Id, TimeStopBars, pos.NetProfit, pos.Pips);
+                else
+                    Print("[TIME-STOP] FAILED to close #{0}: {1}", pos.Id, r.Error);
+            }
         }
 
         /// <summary>

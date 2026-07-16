@@ -39,8 +39,25 @@ namespace cAlgo.Robots
             FixedLots
         }
 
+        public enum StopMode
+        {
+            AtrMultiple,
+            FixedUsd
+        }
+
         [Parameter("Sizing Mode", Group = "Risk", DefaultValue = SizingMode.RiskPercent)]
         public SizingMode Sizing { get; set; }
+
+        // AtrMultiple adapts the disaster stop to current volatility (wide in wild weeks,
+        // tighter in quiet ones) - avoids noise stop-outs without changing the strategy.
+        [Parameter("Stop Mode", Group = "Risk", DefaultValue = StopMode.AtrMultiple)]
+        public StopMode StopSizing { get; set; }
+
+        [Parameter("ATR Multiple (AtrMultiple mode)", Group = "Risk", DefaultValue = 3.0, MinValue = 1.0, Step = 0.25)]
+        public double AtrMultiple { get; set; }
+
+        [Parameter("ATR Period (daily bars)", Group = "Risk", DefaultValue = 14, MinValue = 5)]
+        public int AtrPeriod { get; set; }
 
         // Risk per trade as % of balance, measured against the emergency SL.
         [Parameter("Risk % (RiskPercent mode)", Group = "Risk", DefaultValue = 0.5, MinValue = 0.05, Step = 0.05)]
@@ -202,7 +219,11 @@ namespace cAlgo.Robots
                     return;
             }
 
-            double volumeUnits = ComputeVolume(nowOpen);
+            double slUsd = StopSizing == StopMode.FixedUsd ? EmergencySlUsd : AtrMultiple * DailyAtr();
+            if (slUsd <= 0)
+                return;
+
+            double volumeUnits = ComputeVolume(nowOpen, slUsd);
             if (volumeUnits < Symbol.VolumeInUnitsMin)
             {
                 Print("[SKIP] {0:yyyy-MM-dd HH:mm} computed volume {1} below symbol minimum {2}.",
@@ -210,19 +231,36 @@ namespace cAlgo.Robots
                 return;
             }
 
-            double slPips = EmergencySlUsd / Symbol.PipSize;
+            double slPips = slUsd / Symbol.PipSize;
             var result = ExecuteMarketOrder(TradeType.Buy, SymbolName, volumeUnits, Label, slPips, null);
             if (result.IsSuccessful)
             {
                 _lastEntryDate = nowOpen.Date;
-                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} long #{1} at {2}, {3} units, SL ${4} ({5:F0} pips), spread ${6:F2}, exit {7}:00 UTC.",
-                    nowOpen, result.Position.Id, result.Position.EntryPrice, volumeUnits, EmergencySlUsd, slPips, Symbol.Spread, ExitHourUtc);
+                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} long #{1} at {2}, {3} units, SL ${4:F2} ({5:F0} pips, {6}), spread ${7:F2}, exit {8}:00 UTC.",
+                    nowOpen, result.Position.Id, result.Position.EntryPrice, volumeUnits, slUsd, slPips, StopSizing, Symbol.Spread, ExitHourUtc);
             }
             else
                 Print("[ENTRY] {0:yyyy-MM-dd HH:mm} FAILED: {1}", nowOpen, result.Error);
         }
 
-        private double ComputeVolume(System.DateTime nowOpen)
+        /// Average True Range over the last AtrPeriod COMPLETED daily bars, in USD.
+        private double DailyAtr()
+        {
+            int last = _daily.Count - 2;
+            if (last < AtrPeriod)
+                return 0;
+            double sum = 0;
+            for (int i = last - AtrPeriod + 1; i <= last; i++)
+            {
+                double tr = System.Math.Max(_daily.HighPrices[i] - _daily.LowPrices[i],
+                            System.Math.Max(System.Math.Abs(_daily.HighPrices[i] - _daily.ClosePrices[i - 1]),
+                                            System.Math.Abs(_daily.LowPrices[i] - _daily.ClosePrices[i - 1])));
+                sum += tr;
+            }
+            return sum / AtrPeriod;
+        }
+
+        private double ComputeVolume(System.DateTime nowOpen, double slUsd)
         {
             double raw;
             if (Sizing == SizingMode.FixedLots)
@@ -233,7 +271,7 @@ namespace cAlgo.Robots
             {
                 // PipValue is per unit of volume: units = risk money / (SL pips * pip value).
                 double riskMoney = Account.Balance * RiskPercent / 100.0;
-                raw = riskMoney / ((EmergencySlUsd / Symbol.PipSize) * Symbol.PipValue);
+                raw = riskMoney / ((slUsd / Symbol.PipSize) * Symbol.PipValue);
             }
 
             if (nowOpen.DayOfWeek == System.DayOfWeek.Thursday)

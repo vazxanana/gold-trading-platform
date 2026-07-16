@@ -51,6 +51,12 @@ namespace cAlgo.Robots
         [Parameter("Long Only", Group = "Risk", DefaultValue = false)]
         public bool LongOnly { get; set; }
 
+        // Chandelier-style ATR trail: for longs the SL only ever ratchets UP to
+        // close - mult*ATR(14, daily); mirrored for shorts. 0 = off (paper spec).
+        // Locks large trend wins while preserving the strategy's positive skew.
+        [Parameter("Trailing Stop (ATR mult, 0=off)", Group = "Risk", DefaultValue = 0.0, MinValue = 0, Step = 0.5)]
+        public double TrailAtrMult { get; set; }
+
         // Resize outside the monthly rebalance only when the open size drifts this far
         // from target (keeps churn and spread costs down).
         [Parameter("Resize Drift Threshold (%)", Group = "Risk", DefaultValue = 40, MinValue = 10)]
@@ -185,6 +191,7 @@ namespace cAlgo.Robots
                 }
                 else
                 {
+                    UpdateTrailingStop(m, pos, last);
                     return; // keep riding the trend
                 }
             }
@@ -208,6 +215,53 @@ namespace cAlgo.Robots
                     dailyVolFrac * 100, slPips.HasValue ? slPips.Value.ToString("F0") + "p" : "none");
             else
                 Print("[{0}] {1} FAILED: {2}", m.Sym.Name, wantType, result.Error);
+        }
+
+        /// ATR(14) over completed daily bars, in price units.
+        private static double DailyAtr(Bars d, int last, int period)
+        {
+            if (last < period)
+                return 0;
+            double sum = 0;
+            for (int i = last - period + 1; i <= last; i++)
+            {
+                double tr = Math.Max(d.HighPrices[i] - d.LowPrices[i],
+                            Math.Max(Math.Abs(d.HighPrices[i] - d.ClosePrices[i - 1]),
+                                     Math.Abs(d.LowPrices[i] - d.ClosePrices[i - 1])));
+                sum += tr;
+            }
+            return sum / period;
+        }
+
+        private void UpdateTrailingStop(Market m, Position pos, int last)
+        {
+            if (TrailAtrMult <= 0)
+                return;
+            double atr = DailyAtr(m.Daily, last, 14);
+            if (atr <= 0)
+                return;
+            double close = m.Daily.ClosePrices[last];
+            // ModifyPosition takes ABSOLUTE prices; ratchet only in the protective direction.
+            if (pos.TradeType == TradeType.Buy)
+            {
+                double candidate = close - TrailAtrMult * atr;
+                if (!pos.StopLoss.HasValue || candidate > pos.StopLoss.Value)
+                {
+                    var r = ModifyPosition(pos, candidate, pos.TakeProfit, null);
+                    if (r.IsSuccessful)
+                        Print("[{0}] trail SL -> {1}", m.Sym.Name, candidate);
+                }
+            }
+            else
+            {
+                double candidate = close + TrailAtrMult * atr;
+                if (!pos.StopLoss.HasValue || candidate < pos.StopLoss.Value)
+                {
+                    var r = ModifyPosition(pos, candidate, pos.TakeProfit, null);
+                    if (r.IsSuccessful)
+                        Print("[{0}] trail SL -> {1}", m.Sym.Name, candidate);
+                }
+            }
         }
 
         protected override void OnStop()
