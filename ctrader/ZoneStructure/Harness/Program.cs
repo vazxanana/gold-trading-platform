@@ -29,11 +29,11 @@ internal static class Program
     // Mirror of the bot's defaults
     const int SwingStrength = 3;
     const bool RequireFreshZone = true;
-    const bool RequireDailyAlignment = true;
-    const int ZoneExpiryBars = 32;
+    const bool RequireDailyAlignment = false;
+    const int ZoneExpiryBars = 96;
     const int H4Lookback = 600, D1Lookback = 300, M15Lookback = 400;
     const int MaxZonesPerSide = 4;
-    const double SlBufferUsd = 1.5, MinSlUsd = 3.0, MaxSlUsd = 30.0, MinRR = 1.0, TargetOffsetUsd = 0.5;
+    const double SlBufferUsd = 1.5, MinSlUsd = 3.0, MaxSlUsd = 60.0, MinRR = 1.0, TargetOffsetUsd = 0.5;
 
     class Bar { public double O, H, L, C; }
 
@@ -229,7 +229,13 @@ internal static class Program
             if (posOpen) continue;
 
             double entry = close;   // proxy for next-bar market fill
-            double slPrice = wantLong ? zone.Lo - SlBufferUsd : zone.Hi + SlBufferUsd;
+            // mirror of the bot's M15Swing SL placement with zone-edge fallback
+            double? m15Prot = m15Map.State != null && (m15Map.State.Trend == "bull") == wantLong
+                ? m15Map.State.ProtectedPrice : null;
+            double slAnchor = m15Prot.HasValue && (wantLong ? m15Prot.Value < entry : m15Prot.Value > entry)
+                ? m15Prot.Value
+                : (wantLong ? zone.Lo : zone.Hi);
+            double slPrice = wantLong ? slAnchor - SlBufferUsd : slAnchor + SlBufferUsd;
             double slUsd = wantLong ? entry - slPrice : slPrice - entry;
             if (slUsd < MinSlUsd) slUsd = MinSlUsd;
             if (slUsd > MaxSlUsd) continue;
@@ -256,12 +262,13 @@ internal static class Program
             posOpen = true; posLong = wantLong; posSl = e2.Sl; posTp = e2.Tp;
             consumed.Add(zone.OriginAbs); armed.Remove(zone);
 
-            Check(d1Trend == trend, $"I1 D1 aligned at bar {m}");
+            Check(!RequireDailyAlignment || d1Trend == trend, $"I1 D1 aligned at bar {m}");
             Check(zone.FreshAtArm || !RequireFreshZone, $"I2 zone fresh at arm (bar {m})");
             Check(m - zone.ArmedAtBar <= ZoneExpiryBars, $"I2 touch within expiry (bar {m})");
             Check(trig.I2 == m15Candles.Count - 1 && m15Candles[trig.I2].Index == m, $"I3 trigger on completed bar {m}");
-            Check(wantLong ? slPrice <= zone.Lo - SlBufferUsd + 1e-9 : slPrice >= zone.Hi + SlBufferUsd - 1e-9,
-                $"I4 SL beyond zone edge (bar {m})");
+            Check(wantLong ? slPrice <= slAnchor - SlBufferUsd + 1e-9 : slPrice >= slAnchor + SlBufferUsd - 1e-9,
+                $"I4 SL beyond structural anchor (bar {m})");
+            Check(wantLong ? slAnchor < entry : slAnchor > entry, $"I4 SL anchor on the correct side (bar {m})");
             Check(slUsd >= MinSlUsd - 1e-9 && slUsd <= MaxSlUsd + 1e-9, $"I4 SL within [{MinSlUsd},{MaxSlUsd}] (bar {m})");
             double rawTarget = wantLong ? tpPrice + TargetOffsetUsd : tpPrice - TargetOffsetUsd;
             Check(VerifyUnswept(rawTarget, wantLong, h4Candles, d1Candles), $"I5 target {rawTarget:F2} unswept at entry (bar {m})");

@@ -43,6 +43,7 @@ namespace cAlgo.Robots
 {
     public enum TradeDirectionMode { Buy, Sell, Both }
     public enum EntryTriggerMode { ChochOnly, ChochOrBos }
+    public enum SlPlacementMode { M15Swing, ZoneEdge }
 
     [Robot(AccessRights = AccessRights.None)]
     public class ZoneStructureBot : Robot
@@ -59,13 +60,18 @@ namespace cAlgo.Robots
         [Parameter("Require FRESH (unmitigated) zone", Group = "Signal", DefaultValue = true)]
         public bool RequireFreshZone { get; set; }
 
-        [Parameter("Require D1 trend alignment", Group = "Signal", DefaultValue = true)]
+        // D1 structure flips confirm late, so it is often out of sync with H4
+        // exactly when the H4 setup appears — the 2024-2026 log showed it
+        // vetoing half of the few setups that survived every other gate.
+        [Parameter("Require D1 trend alignment", Group = "Signal", DefaultValue = false)]
         public bool RequireDailyAlignment { get; set; }
 
         [Parameter("M15 entry trigger", Group = "Signal", DefaultValue = EntryTriggerMode.ChochOrBos)]
         public EntryTriggerMode EntryTrigger { get; set; }
 
-        [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 32, MinValue = 4)]
+        // H4 pullbacks take longer than a session to roll over — at 32 bars
+        // (8h) two thirds of armed zones expired before the M15 trigger came.
+        [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 96, MinValue = 4)]
         public int ZoneExpiryBars { get; set; }
 
         // ── Structure lookbacks ─────────────────────────────────────────────
@@ -85,13 +91,21 @@ namespace cAlgo.Robots
         [Parameter("Risk % of balance per trade", Group = "Risk", DefaultValue = 0.5, MinValue = 0.01, Step = 0.05)]
         public double RiskPercent { get; set; }
 
-        [Parameter("SL buffer beyond zone (USD)", Group = "Risk", DefaultValue = 1.5, MinValue = 0.0, Step = 0.1)]
+        // M15Swing: stop beyond the M15 swing the breakdown launched from
+        // (the protected origin of the trigger break) — what a manual trader
+        // uses after a ChoCh entry. ZoneEdge: stop beyond the whole H4 zone;
+        // H4 order blocks on gold run $30-50 tall, so pair it with a larger
+        // MaxSlUsd.
+        [Parameter("SL placement", Group = "Risk", DefaultValue = SlPlacementMode.M15Swing)]
+        public SlPlacementMode SlPlacement { get; set; }
+
+        [Parameter("SL buffer beyond structure (USD)", Group = "Risk", DefaultValue = 1.5, MinValue = 0.0, Step = 0.1)]
         public double SlBufferUsd { get; set; }
 
         [Parameter("Min SL distance (USD)", Group = "Risk", DefaultValue = 3.0, MinValue = 0.5, Step = 0.5)]
         public double MinSlUsd { get; set; }
 
-        [Parameter("Max SL distance (USD)", Group = "Risk", DefaultValue = 30.0, MinValue = 1.0, Step = 1.0)]
+        [Parameter("Max SL distance (USD)", Group = "Risk", DefaultValue = 60.0, MinValue = 1.0, Step = 1.0)]
         public double MaxSlUsd { get; set; }
 
         [Parameter("Min reward:risk", Group = "Risk", DefaultValue = 1.0, MinValue = 0.1, Step = 0.1)]
@@ -150,8 +164,8 @@ namespace cAlgo.Robots
 
             Print("[START] ZoneStructure on {0} {1} | dir={2} trigger={3} freshZone={4} d1Align={5}",
                 SymbolName, TimeFrame, TradeDirection, EntryTrigger, RequireFreshZone, RequireDailyAlignment);
-            Print("[START] risk={0}% slBuffer=${1} minSL=${2} maxSL=${3} minRR={4} tgtOffset=${5} zoneExpiry={6} m15 bars",
-                RiskPercent, SlBufferUsd, MinSlUsd, MaxSlUsd, MinRR, TargetOffsetUsd, ZoneExpiryBars);
+            Print("[START] risk={0}% slMode={1} slBuffer=${2} minSL=${3} maxSL=${4} minRR={5} tgtOffset=${6} zoneExpiry={7} m15 bars",
+                RiskPercent, SlPlacement, SlBufferUsd, MinSlUsd, MaxSlUsd, MinRR, TargetOffsetUsd, ZoneExpiryBars);
             Print("[START] pip size = {0} → $1.00 = {1} pips on this symbol", Symbol.PipSize, 1.0 / Symbol.PipSize);
         }
 
@@ -238,11 +252,31 @@ namespace cAlgo.Robots
 
             // ── Structural stop ─────────────────────────────────────────────
             double entry = wantLong ? Symbol.Ask : Symbol.Bid;
-            double slPrice = wantLong ? zone.Lo - SlBufferUsd : zone.Hi + SlBufferUsd;
+            double slAnchor;
+            string slDesc;
+            // M15Swing: the trigger break's protected origin — the swing the
+            // breakdown/breakout launched from. After the trigger the M15 map
+            // trend matches our direction, so State.ProtectedPrice is that
+            // swing. Falls back to the zone edge if unavailable.
+            double? m15Prot = SlPlacement == SlPlacementMode.M15Swing
+                && _m15Map.State != null && (_m15Map.State.Trend == "bull") == wantLong
+                ? _m15Map.State.ProtectedPrice : null;
+            if (m15Prot.HasValue && (wantLong ? m15Prot.Value < entry : m15Prot.Value > entry))
+            {
+                slAnchor = m15Prot.Value;
+                slDesc = string.Format("M15 swing {0:F2}", slAnchor);
+            }
+            else
+            {
+                slAnchor = wantLong ? zone.Lo : zone.Hi;
+                slDesc = string.Format("zone edge {0:F2}", slAnchor);
+            }
+            double slPrice = wantLong ? slAnchor - SlBufferUsd : slAnchor + SlBufferUsd;
             double slUsd = wantLong ? entry - slPrice : slPrice - entry;
             if (slUsd < MinSlUsd) slUsd = MinSlUsd;
             if (slUsd > MaxSlUsd)
-            { LogSkip(last, string.Format("structural SL ${0:F2} > max ${1:F2} (zone {2:F2}-{3:F2})", slUsd, MaxSlUsd, zone.Lo, zone.Hi)); return; }
+            { LogSkip(last, string.Format("structural SL ${0:F2} ({1}) > max ${2:F2} (zone {3:F2}-{4:F2})", slUsd, slDesc, MaxSlUsd, zone.Lo, zone.Hi)); return; }
+            slPrice = wantLong ? entry - slUsd : entry + slUsd;   // reflect the MinSl floor in the logged price
 
             // ── Liquidity target: nearest unswept H4/D1 swing beyond price ──
             var targets = CollectUnsweptTargets(wantLong, entry);
@@ -279,10 +313,10 @@ namespace cAlgo.Robots
                 _tradesToday++;
                 _consumedZones.Add(zone.OriginAbs);
                 _armed.Remove(zone);
-                Print("[ENTER] {0} {1} @ {2:F2} on M15 {3} | zone {4:F2}-{5:F2}{6} (H4 origin {7:yyyy-MM-dd HH:mm}) | SL {8:F2} (${9:F2}) TP → {10} | RR {11:F2} | vol {12}",
+                Print("[ENTER] {0} {1} @ {2:F2} on M15 {3} | zone {4:F2}-{5:F2}{6} (H4 origin {7:yyyy-MM-dd HH:mm}) | SL {8:F2} (${9:F2} via {10}) TP → {11} | RR {12:F2} | vol {13}",
                     tradeType, SymbolName, entry, trig.Type,
                     zone.Lo, zone.Hi, zone.Star ? " ★ChoCh-origin" : "", zone.OriginTime,
-                    slPrice, slUsd, tgtDesc, tpUsd / slUsd, units);
+                    slPrice, slUsd, slDesc, tgtDesc, tpUsd / slUsd, units);
             }
             else
             {
