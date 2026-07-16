@@ -79,6 +79,11 @@ namespace cAlgo.Robots
         [Parameter("Max SL (USD)", Group = "Risk", DefaultValue = 30.0, MinValue = 1.0)]
         public double MaxSlUsd { get; set; }
 
+        // Floor: a structural stop tighter than this is noise, not structure - skip.
+        // (Prevents razor stops right after a CHoCH producing oversized positions.)
+        [Parameter("Min SL (USD)", Group = "Risk", DefaultValue = 3.0, MinValue = 0.5, Step = 0.5)]
+        public double MinSlUsd { get; set; }
+
         // Skip trades whose structural target pays less than this multiple of the risk.
         [Parameter("Min Reward/Risk to Target", Group = "Risk", DefaultValue = 1.0, MinValue = 0.25, Step = 0.25)]
         public double MinRR { get; set; }
@@ -397,18 +402,39 @@ namespace cAlgo.Robots
                 Print("[SKIP] {0:yyyy-MM-dd HH:mm} structural SL ${1:F2} exceeds cap ${2}.", nowOpen, slUsd, MaxSlUsd);
                 return;
             }
-
-            // structural take-profit: last confirmed swing of the target timeframe
-            var targetTracker = Target == TargetMode.H4Swing ? _h4 : _m15;
-            double targetLevel = tradeType == TradeType.Buy ? targetTracker.LastHigh : targetTracker.LastLow;
-            if (double.IsNaN(targetLevel))
-                return;
-            double rewardUsd = tradeType == TradeType.Buy ? targetLevel - refPrice : refPrice - targetLevel;
-            if (rewardUsd <= 0)
+            if (slUsd < MinSlUsd)
             {
-                Print("[SKIP] {0:yyyy-MM-dd HH:mm} target {1} already beyond price {2}.", nowOpen, targetLevel, refPrice);
+                Print("[SKIP] {0:yyyy-MM-dd HH:mm} structural SL ${1:F2} below floor ${2} (noise, not structure).", nowOpen, slUsd, MinSlUsd);
                 return;
             }
+
+            // structural take-profit: the NEAREST target-TF swing BEYOND current price
+            // (a bullish CHoCH just broke the last swing high, so that level is behind
+            // us - the tradable target is the pre-pullback swing still ahead).
+            var targetTracker = Target == TargetMode.H4Swing ? _h4 : _m15;
+            double targetLevel = double.NaN;
+            if (tradeType == TradeType.Buy)
+            {
+                if (!double.IsNaN(targetTracker.LastHigh) && targetTracker.LastHigh > refPrice)
+                    targetLevel = targetTracker.LastHigh;
+                if (!double.IsNaN(targetTracker.PrevHigh) && targetTracker.PrevHigh > refPrice
+                    && (double.IsNaN(targetLevel) || targetTracker.PrevHigh < targetLevel))
+                    targetLevel = targetTracker.PrevHigh;
+            }
+            else
+            {
+                if (!double.IsNaN(targetTracker.LastLow) && targetTracker.LastLow < refPrice)
+                    targetLevel = targetTracker.LastLow;
+                if (!double.IsNaN(targetTracker.PrevLow) && targetTracker.PrevLow < refPrice
+                    && (double.IsNaN(targetLevel) || targetTracker.PrevLow > targetLevel))
+                    targetLevel = targetTracker.PrevLow;
+            }
+            if (double.IsNaN(targetLevel))
+            {
+                Print("[SKIP] {0:yyyy-MM-dd HH:mm} no {1} swing beyond price {2} to target.", nowOpen, Target, refPrice);
+                return;
+            }
+            double rewardUsd = tradeType == TradeType.Buy ? targetLevel - refPrice : refPrice - targetLevel;
             double rr = rewardUsd / slUsd;
             if (rr < MinRR)
             {
