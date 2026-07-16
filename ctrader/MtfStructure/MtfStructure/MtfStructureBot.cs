@@ -17,32 +17,33 @@ namespace cAlgo.Robots
         M5
     }
 
+    public enum TargetMode
+    {
+        M15Swing,
+        H4Swing
+    }
+
     /// <summary>
-    /// Multi-timeframe market-structure bot (Daily / H4 / M15 / M5), implementing the
-    /// fractal-cascade idea: structure change on a lower timeframe is the earliest
-    /// evidence that the timeframe above it is turning.
+    /// Multi-timeframe market-structure bot v2 (H4 / M15 / M5), revised after the v1
+    /// backtest showed the counter-trend cascade lost (PF 0.86): v1 bought while the
+    /// H4 was still falling with M15-sized stops - a thesis/stop scale mismatch.
     ///
-    ///   - Daily structure (HH/HL vs LH/LL) defines the TREND to trade with.
-    ///   - An H4 CHoCH against the Daily trend = "the Daily pullback has started";
-    ///     H4 trend opposite to Daily = pullback in progress. We only hunt entries here.
-    ///   - An M15 CHoCH back TOWARD the Daily trend = "the H4 pullback is ending" -
-    ///     the continuation signal (EntryTimeframe = M15).
-    ///   - An M5 CHoCH toward the Daily trend while M15 is still in pullback = the
-    ///     earliest version of the same signal (EntryTimeframe = M5): more trades,
-    ///     earlier entries, more false starts. A/B both.
+    /// v2 trades WITH the H4 trend and targets structure:
+    ///   - H4 structure (HH/HL vs LH/LL) defines the trend to follow.
+    ///   - Entry: an M15 CHoCH back TOWARD the H4 trend (the M15 pullback inside the
+    ///     H4 trend is ending). EntryTimeframe=M5 uses the earlier M5 CHoCH while the
+    ///     M15 is still in pullback.
+    ///   - TP: STRUCTURAL - the last confirmed M15 or H4 swing high (longs) / low
+    ///     (shorts), selectable via TargetMode. No fixed R multiple.
+    ///   - Quality gate: computed reward/risk to the structural target must be at
+    ///     least MinRR, otherwise the trade is skipped (target too close).
+    ///   - SL: structural at the entry-TF pullback swing + ATR buffer, USD-capped.
+    ///   - Optional Daily alignment filter (D1 trend must match H4) and optional
+    ///     structure exit on an opposite entry-TF CHoCH before target.
     ///
-    /// Entry: market order in the Daily direction when the cascade lines up.
-    /// SL: structural - beyond the entry timeframe's pullback swing, + ATR buffer.
-    /// TP: RR multiple, or 0 = exit on the entry timeframe's opposite CHoCH.
-    ///
-    /// Every timeframe uses the same mechanical structure engine as MarketStructureBot:
-    /// fractal swings confirmed SwingStrength bars late (no look-ahead), trend from the
-    /// last two swings of each kind, CHoCH = close through the swing against trend.
-    /// All series read COMPLETED bars only.
-    ///
-    /// ATTACH TO M5 (asserted) - it drives all four trackers.
-    /// Evidence note: on gold every shorting variant this repo has tested failed;
-    /// A/B TradeDirection=Buy against Both before trusting the short side.
+    /// Same mechanical structure engine as before: fractal swings confirmed late
+    /// (no look-ahead), completed bars only. ATTACH TO M5 (asserted).
+    /// Evidence note: gold shorts failed every research window - A/B Buy vs Both.
     /// </summary>
     [Robot(AccessRights = AccessRights.None)]
     public class MtfStructureBot : Robot
@@ -56,10 +57,18 @@ namespace cAlgo.Robots
         [Parameter("Swing Strength (bars each side)", Group = "Signal", DefaultValue = 3, MinValue = 1, MaxValue = 10)]
         public int SwingStrength { get; set; }
 
-        // Strict: H4 trend must be OPPOSITE the Daily trend (a real pullback).
-        // Relaxed (false): H4 merely not aligned (neutral counts) also qualifies.
-        [Parameter("Require Strict H4 Pullback", Group = "Signal", DefaultValue = true)]
-        public bool StrictH4Pullback { get; set; }
+        // Structural take-profit level: last confirmed swing of this timeframe
+        // (high for longs, low for shorts). H4Swing = larger targets, fewer hit.
+        [Parameter("Target", Group = "Signal", DefaultValue = TargetMode.M15Swing)]
+        public TargetMode Target { get; set; }
+
+        // Optional higher-TF alignment: Daily trend must match the H4 trend.
+        [Parameter("Require Daily Alignment", Group = "Signal", DefaultValue = false)]
+        public bool RequireDailyAlignment { get; set; }
+
+        // Close early if the entry TF fires a CHoCH against the position before TP.
+        [Parameter("Structure Exit (opposite CHoCH closes)", Group = "Signal", DefaultValue = true)]
+        public bool StructureExit { get; set; }
 
         [Parameter("Risk % per Trade", Group = "Risk", DefaultValue = 0.5, MinValue = 0.05, Step = 0.05)]
         public double RiskPercent { get; set; }
@@ -70,8 +79,9 @@ namespace cAlgo.Robots
         [Parameter("Max SL (USD)", Group = "Risk", DefaultValue = 30.0, MinValue = 1.0)]
         public double MaxSlUsd { get; set; }
 
-        [Parameter("TP (R multiple, 0 = exit on opposite CHoCH)", Group = "Risk", DefaultValue = 2.0, MinValue = 0, Step = 0.25)]
-        public double RRRatio { get; set; }
+        // Skip trades whose structural target pays less than this multiple of the risk.
+        [Parameter("Min Reward/Risk to Target", Group = "Risk", DefaultValue = 1.0, MinValue = 0.25, Step = 0.25)]
+        public double MinRR { get; set; }
 
         [Parameter("Daily Trade Limit", Group = "Risk", DefaultValue = 3, MinValue = 1)]
         public int DailyTradeLimit { get; set; }
@@ -236,8 +246,8 @@ namespace cAlgo.Robots
             _atrM15 = Indicators.AverageTrueRange(m15, 14, MovingAverageType.Simple);
             _atrM5 = Indicators.AverageTrueRange(14, MovingAverageType.Simple);
 
-            Print("Started on {0} M5. Cascade D1>H4>{1} entries, swing strength {2}, strictH4Pullback={3}, direction={4}, RR={5}.",
-                SymbolName, EntryTf, SwingStrength, StrictH4Pullback, TradeDirection, RRRatio);
+            Print("Started on {0} M5. Follow H4 trend, {1} entries, target {2}, swing strength {3}, dailyAlign={4}, direction={5}, minRR={6}.",
+                SymbolName, EntryTf, Target, SwingStrength, RequireDailyAlignment, TradeDirection, MinRR);
         }
 
         private static void EnsureHistory(Bars bars, int target)
@@ -268,38 +278,36 @@ namespace cAlgo.Robots
             if (DebugStructure)
                 DailyDiag();
 
-            int dailyTrend = _daily.Trend;
+            int h4Trend = _h4.Trend;
 
-            // is there a candidate lower-TF CHoCH event at all this bar?
+            // candidate lower-TF CHoCH event this bar?
             int entryBreak = EntryTf == EntryTimeframeMode.M15 ? m15Break : m5Break;
             bool entryChoch = EntryTf == EntryTimeframeMode.M15 ? m15Choch : m5Choch;
             if (entryBreak == 0 || !entryChoch)
                 return;
 
-            if (dailyTrend == 0)
+            if (h4Trend == 0)
             {
                 _diagBlockedDailyNeutral++;
                 return;
             }
-            if (entryBreak != dailyTrend)
-                return; // CHoCH away from the daily trend - not our signal
-            if (EntryTf == EntryTimeframeMode.M5 && _m15.Trend != -dailyTrend)
+            if (entryBreak != h4Trend)
+                return; // CHoCH away from the H4 trend - not our signal
+            if (EntryTf == EntryTimeframeMode.M5 && _m15.Trend != -h4Trend)
                 return; // M5 mode requires M15 still in pullback
 
             _diagChochToward++;
 
-            // the cascade: H4 must be pulling back against the Daily trend
-            bool h4Pullback = StrictH4Pullback ? _h4.Trend == -dailyTrend : _h4.Trend != dailyTrend;
-            if (!h4Pullback)
+            if (RequireDailyAlignment && _daily.Trend != h4Trend)
             {
                 _diagBlockedNoH4Pullback++;
                 if (DebugStructure)
-                    Print("[GATE] {0:yyyy-MM-dd HH:mm} {1} CHoCH toward D1 trend, but H4 trend={2} is not a pullback (strict={3}).",
-                        Bars.OpenTimes[Bars.Count - 1], EntryTf, _h4.Trend, StrictH4Pullback);
+                    Print("[GATE] {0:yyyy-MM-dd HH:mm} {1} CHoCH toward H4 trend, but D1 trend={2} not aligned.",
+                        Bars.OpenTimes[Bars.Count - 1], EntryTf, _daily.Trend);
                 return;
             }
 
-            var tradeType = dailyTrend > 0 ? TradeType.Buy : TradeType.Sell;
+            var tradeType = h4Trend > 0 ? TradeType.Buy : TradeType.Sell;
             if (TradeDirection != TradeDirectionMode.Both
                 && (tradeType == TradeType.Buy) != (TradeDirection == TradeDirectionMode.Buy))
             {
@@ -309,14 +317,14 @@ namespace cAlgo.Robots
             Enter(tradeType);
         }
 
-        /// <summary>Once per day: the state of all four trackers plus gate counters.</summary>
+        /// <summary>Once per day: the state of all four trackers plus gate counters.</summary>        /// <summary>Once per day: the state of all four trackers plus gate counters.</summary>
         private void DailyDiag()
         {
             var d = Bars.OpenTimes[Bars.Count - 1].Date;
             if (d == _diagDate)
                 return;
             if (_diagDate != System.DateTime.MinValue)
-                Print("[DIAG {0:yyyy-MM-dd}] D1={1} H4={2} M15={3} M5={4} | CHoCH-toward-D1: {5}, blocked: dailyNeutral {6}, noH4Pullback {7}, direction {8}.",
+                Print("[DIAG {0:yyyy-MM-dd}] D1={1} H4={2} M15={3} M5={4} | CHoCH-toward-H4: {5}, blocked: h4Neutral {6}, dailyAlign {7}, direction {8}.",
                     _diagDate, T(_daily), T(_h4), T(_m15), T(_m5),
                     _diagChochToward + _diagBlockedDailyNeutral, _diagBlockedDailyNeutral, _diagBlockedNoH4Pullback, _diagBlockedDirection);
             _diagDate = d;
@@ -328,10 +336,10 @@ namespace cAlgo.Robots
             return tr.Trend > 0 ? "UP" : tr.Trend < 0 ? "DOWN" : "flat";
         }
 
-        /// <summary>RRRatio = 0 mode: opposite CHoCH on the entry TF closes the position.</summary>
+        /// <summary>Optional: opposite CHoCH on the entry TF closes the position early.</summary>
         private void ManageStructureExit(int m15Break, bool m15Choch, int m5Break, bool m5Choch)
         {
-            if (RRRatio > 0)
+            if (!StructureExit)
                 return;
             int exitBreak = EntryTf == EntryTimeframeMode.M15 ? m15Break : m5Break;
             bool exitChoch = EntryTf == EntryTimeframeMode.M15 ? m15Choch : m5Choch;
@@ -390,8 +398,27 @@ namespace cAlgo.Robots
                 return;
             }
 
+            // structural take-profit: last confirmed swing of the target timeframe
+            var targetTracker = Target == TargetMode.H4Swing ? _h4 : _m15;
+            double targetLevel = tradeType == TradeType.Buy ? targetTracker.LastHigh : targetTracker.LastLow;
+            if (double.IsNaN(targetLevel))
+                return;
+            double rewardUsd = tradeType == TradeType.Buy ? targetLevel - refPrice : refPrice - targetLevel;
+            if (rewardUsd <= 0)
+            {
+                Print("[SKIP] {0:yyyy-MM-dd HH:mm} target {1} already beyond price {2}.", nowOpen, targetLevel, refPrice);
+                return;
+            }
+            double rr = rewardUsd / slUsd;
+            if (rr < MinRR)
+            {
+                Print("[SKIP] {0:yyyy-MM-dd HH:mm} structural RR {1:F2} below minimum {2:F2} (reward ${3:F2} / risk ${4:F2}).",
+                    nowOpen, rr, MinRR, rewardUsd, slUsd);
+                return;
+            }
+
             double slPips = slUsd / Symbol.PipSize;
-            double? tpPips = RRRatio > 0 ? slPips * RRRatio : (double?)null;
+            double? tpPips = rewardUsd / Symbol.PipSize;
             double riskMoney = Account.Balance * RiskPercent / 100.0;
             double units = Symbol.NormalizeVolumeInUnits(riskMoney / (slPips * Symbol.PipValue), RoundingMode.Down);
             if (units < Symbol.VolumeInUnitsMin)
@@ -406,11 +433,10 @@ namespace cAlgo.Robots
             if (result.IsSuccessful)
             {
                 _tradesToday++;
-                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} {1} #{2} at {3} - D1 {4}, H4 pullback, {5} CHoCH continuation. {6} units, SL ${7:F2}, TP {8}. Trade {9}/{10}.",
+                Print("[ENTRY] {0:yyyy-MM-dd HH:mm} {1} #{2} at {3} - H4 {4}, {5} CHoCH continuation. {6} units, SL ${7:F2}, target {8} ({9}, RR {10:F2}). Trade {11}/{12}.",
                     nowOpen, tradeType, result.Position.Id, result.Position.EntryPrice,
-                    _daily.Trend > 0 ? "UP" : "DOWN", EntryTf, units, slUsd,
-                    tpPips.HasValue ? tpPips.Value.ToString("F0") + "p" : "structure exit",
-                    _tradesToday, DailyTradeLimit);
+                    _h4.Trend > 0 ? "UP" : "DOWN", EntryTf, units, slUsd,
+                    targetLevel, Target, rr, _tradesToday, DailyTradeLimit);
             }
             else
                 Print("[ENTRY] {0:yyyy-MM-dd HH:mm} FAILED: {1}", nowOpen, result.Error);
