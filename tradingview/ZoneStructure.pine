@@ -594,7 +594,7 @@ plotshape(sigLong, "Long signal", style = shape.triangleup, location = location.
 plotshape(sigShort, "Short signal", style = shape.triangledown, location = location.abovebar, color = COL_SUPPLY, size = size.small)
 
 if showTrade and (sigLong or sigShort)
-    box.new(left = math.round(sigZoneOt), top = sigZoneHi, right = time, bottom = sigZoneLo, xloc = xloc.bartime, bgcolor = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 80), border_color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 40))
+    box.new(left = math.round(sigZoneOt), top = sigZoneHi, right = time, bottom = sigZoneLo, xloc = xloc.bar_time, bgcolor = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 80), border_color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 40))
     txt = (sigLong ? "LONG " : "SHORT ") + str.tostring(close, format.mintick) + "\nSL " + str.tostring(sigSl, format.mintick) + " · TP " + str.tostring(sigTp, format.mintick) + "\nRR " + str.tostring(sigRR, "#.##")
     label.new(bar_index, sigLong ? low : high, txt, style = sigLong ? label.style_label_up : label.style_label_down, color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 20), textcolor = color.white, size = size.small)
 
@@ -646,7 +646,7 @@ if showZones and barstate.islast
             fr = array.get(sFr, si)
             baseC = zbull ? COL_DEMAND : COL_SUPPLY
             alpha = fr >= 2 ? 70 : fr >= 1 ? 80 : 92
-            bx = box.new(left = math.round(array.get(sOt, si)), top = array.get(sHi, si), right = time, bottom = array.get(sLo, si), xloc = xloc.bartime, bgcolor = color.new(baseC, alpha), border_color = color.new(baseC, 50), text = fr >= 1 ? "fresh" : "", text_color = color.new(baseC, 20), text_size = size.tiny)
+            bx = box.new(left = math.round(array.get(sOt, si)), top = array.get(sHi, si), right = time, bottom = array.get(sLo, si), xloc = xloc.bar_time, bgcolor = color.new(baseC, alpha), border_color = color.new(baseC, 50), text = fr >= 1 ? "fresh" : "", text_color = color.new(baseC, 20), text_size = size.tiny)
             array.push(zoneBoxes, bx)
 
 // ── Status table (the cBot's [GATE] diagnostics, on-chart) ──────────────────
