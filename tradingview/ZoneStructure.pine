@@ -10,7 +10,12 @@
 //      TP at the nearest UNSWEPT H4/D1 swing, MinRR gate.
 // The streaming engine below is verified bar-for-bar identical to the bot's
 // batch engine (events, swings, zones, and final signals) in the repo's
-// equivalence harness before porting.
+// equivalence harness before porting. Two accepted, practically-unreachable
+// divergences vs the C# stream reference: (1) the swing working set is
+// capped at 400 (≈2800 zone-TF bars of alternating swings — more than the
+// bot's own 600-bar window retains); (2) no explicit 11-bar higher-TF
+// warmup gate — request.security supplies deep HTF history predating the
+// chart on established symbols, so the warmup window is never visible.
 indicator("ZoneStructure SMC (H4 zones + M15 ChoCh)", "ZoneStructure", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
 // ── Inputs (defaults mirror the cBot) ───────────────────────────────────────
@@ -385,10 +390,18 @@ f_engine(needView) =>
     float L2 = na
     float L3 = na
     float L4 = na
+    float L5 = na
+    float L6 = na
+    float L7 = na
+    float L8 = na
     float A1 = na
     float A2 = na
     float A3 = na
     float A4 = na
+    float A5 = na
+    float A6 = na
+    float A7 = na
+    float A8 = na
     // the view pipeline is O(zones^2) per bar - only the higher-TF
     // instances need it; the chart instance skips it entirely
     if needView
@@ -438,7 +451,10 @@ f_engine(needView) =>
         [ksHi, ksLo, ksFr, ksOt] = f_dedupe(supHi, supLo, supFr, supOt)
         [kdHi, kdLo, kdFr, kdOt] = f_dedupe(demHi, demLo, demFr, demOt)
 
-        // ── unswept liquidity targets vs this context's close ──
+        // ── unswept liquidity targets: ALL unswept swings (an unswept low
+        // is <= every later low, an unswept high >= every later high, so
+        // they sit beyond this context's close by construction; the live
+        // beyond-entry filter happens chart-side against the actual entry)
         lowsB = array.new<float>()
         highsA = array.new<float>()
         if array.size(swPrc) > 0
@@ -446,11 +462,9 @@ f_engine(needView) =>
                 if not array.get(swSwp, k)
                     p = array.get(swPrc, k)
                     if array.get(swHi, k)
-                        if p > close
-                            array.push(highsA, p)
+                        array.push(highsA, p)
                     else
-                        if p < close
-                            array.push(lowsB, p)
+                        array.push(lowsB, p)
         array.sort(lowsB, order.descending)
         array.sort(highsA, order.ascending)
         s1hi := f_slot(ksHi, 0)
@@ -489,10 +503,18 @@ f_engine(needView) =>
         L2 := array.size(lowsB) > 1 ? array.get(lowsB, 1) : na
         L3 := array.size(lowsB) > 2 ? array.get(lowsB, 2) : na
         L4 := array.size(lowsB) > 3 ? array.get(lowsB, 3) : na
+        L5 := array.size(lowsB) > 4 ? array.get(lowsB, 4) : na
+        L6 := array.size(lowsB) > 5 ? array.get(lowsB, 5) : na
+        L7 := array.size(lowsB) > 6 ? array.get(lowsB, 6) : na
+        L8 := array.size(lowsB) > 7 ? array.get(lowsB, 7) : na
         A1 := array.size(highsA) > 0 ? array.get(highsA, 0) : na
         A2 := array.size(highsA) > 1 ? array.get(highsA, 1) : na
         A3 := array.size(highsA) > 2 ? array.get(highsA, 2) : na
         A4 := array.size(highsA) > 3 ? array.get(highsA, 3) : na
+        A5 := array.size(highsA) > 4 ? array.get(highsA, 4) : na
+        A6 := array.size(highsA) > 5 ? array.get(highsA, 5) : na
+        A7 := array.size(highsA) > 6 ? array.get(highsA, 6) : na
+        A8 := array.size(highsA) > 7 ? array.get(highsA, 7) : na
 
     // golden-pocket band of the CURRENT trend leg: protected origin
     // extreme -> running extreme since it. A zone is 'best' when it
@@ -519,20 +541,20 @@ f_engine(needView) =>
             pBandHi := legHi2 - fibMin * rng2
 
     prot = trendI == 1 ? loPrice : trendI == -1 ? hiPrice : na
-    [evC, evU, evP, evI, evZhi, evZlo, evZot, trendI, prot, pBandLo, pBandHi, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, A1, A2, A3, A4]
+    [evC, evU, evP, evI, evZhi, evZlo, evZot, trendI, prot, pBandLo, pBandHi, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, L5, L6, L7, L8, A1, A2, A3, A4, A5, A6, A7, A8]
 
 // confirmed-bar wrapper: [1] + lookahead_on = state as of the last COMPLETED
 // higher-TF bar on every chart bar — no repaint, no look-ahead
 f_conf() =>
-    [eC, eU, eP, eI, eZh, eZl, eZo, tI, pr, bL, bH, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8] = f_engine(true)
-    [tI[1], bL[1], bH[1], q1[1], q2[1], q3[1], q4[1], q5[1], q6[1], q7[1], q8[1], q9[1], q10[1], q11[1], q12[1], q13[1], q14[1], q15[1], q16[1], q17[1], q18[1], q19[1], q20[1], q21[1], q22[1], q23[1], q24[1], q25[1], q26[1], q27[1], q28[1], q29[1], q30[1], q31[1], q32[1], w1[1], w2[1], w3[1], w4[1], w5[1], w6[1], w7[1], w8[1]]
+    [eC, eU, eP, eI, eZh, eZl, eZo, tI, pr, bL, bH, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(true)
+    [tI[1], bL[1], bH[1], q1[1], q2[1], q3[1], q4[1], q5[1], q6[1], q7[1], q8[1], q9[1], q10[1], q11[1], q12[1], q13[1], q14[1], q15[1], q16[1], q17[1], q18[1], q19[1], q20[1], q21[1], q22[1], q23[1], q24[1], q25[1], q26[1], q27[1], q28[1], q29[1], q30[1], q31[1], q32[1], w1[1], w2[1], w3[1], w4[1], w5[1], w6[1], w7[1], w8[1], w9[1], w10[1], w11[1], w12[1], w13[1], w14[1], w15[1], w16[1]]
 
 // ── Engine instances: chart (trigger), zone TF, target TF ───────────────────
-[evCode, evUp, evPrice, evI1, evZhi, evZlo, evZot, m15Trend, m15Prot, cb1, cb2, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40] = f_engine(false)
+[evCode, evUp, evPrice, evI1, evZhi, evZlo, evZot, m15Trend, m15Prot, cb1, cb2, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40, c41, c42, c43, c44, c45, c46, c47, c48] = f_engine(false)
 
-[zTrend, zBandLo, zBandHi, zs1hi, zs1lo, zs1fr, zs1ot, zs2hi, zs2lo, zs2fr, zs2ot, zs3hi, zs3lo, zs3fr, zs3ot, zs4hi, zs4lo, zs4fr, zs4ot, zd1hi, zd1lo, zd1fr, zd1ot, zd2hi, zd2lo, zd2fr, zd2ot, zd3hi, zd3lo, zd3fr, zd3ot, zd4hi, zd4lo, zd4fr, zd4ot, zl1, zl2, zl3, zl4, zh1, zh2, zh3, zh4] = request.security(syminfo.tickerid, tfZone, f_conf(), lookahead = barmerge.lookahead_on)
+[zTrend, zBandLo, zBandHi, zs1hi, zs1lo, zs1fr, zs1ot, zs2hi, zs2lo, zs2fr, zs2ot, zs3hi, zs3lo, zs3fr, zs3ot, zs4hi, zs4lo, zs4fr, zs4ot, zd1hi, zd1lo, zd1fr, zd1ot, zd2hi, zd2lo, zd2fr, zd2ot, zd3hi, zd3lo, zd3fr, zd3ot, zd4hi, zd4lo, zd4fr, zd4ot, zl1, zl2, zl3, zl4, zl5, zl6, zl7, zl8, zh1, zh2, zh3, zh4, zh5, zh6, zh7, zh8] = request.security(syminfo.tickerid, tfZone, f_conf(), lookahead = barmerge.lookahead_on)
 
-[dTrend, dv0a, dv0b, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, tl1, tl2, tl3, tl4, th1, th2, th3, th4] = request.security(syminfo.tickerid, tfTgt, f_conf(), lookahead = barmerge.lookahead_on)
+[dTrend, dv0a, dv0b, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, tl1, tl2, tl3, tl4, tl5, tl6, tl7, tl8, th1, th2, th3, th4, th5, th6, th7, th8] = request.security(syminfo.tickerid, tfTgt, f_conf(), lookahead = barmerge.lookahead_on)
 
 zTrendS = nz(zTrend, 0)
 dTrendS = nz(dTrend, 0)
@@ -712,13 +734,13 @@ if barstate.isconfirmed
                     // TP: nearest unswept swing beyond price clearing MinRR
                     cand = array.new<float>()
                     if wantLong
-                        for p in array.from(zh1, zh2, zh3, zh4, th1, th2, th3, th4)
+                        for p in array.from(zh1, zh2, zh3, zh4, zh5, zh6, zh7, zh8, th1, th2, th3, th4, th5, th6, th7, th8)
                             if not na(p)
                                 if p > entry
                                     array.push(cand, p)
                         array.sort(cand, order.ascending)
                     else
-                        for p in array.from(zl1, zl2, zl3, zl4, tl1, tl2, tl3, tl4)
+                        for p in array.from(zl1, zl2, zl3, zl4, zl5, zl6, zl7, zl8, tl1, tl2, tl3, tl4, tl5, tl6, tl7, tl8)
                             if not na(p)
                                 if p < entry
                                     array.push(cand, p)
