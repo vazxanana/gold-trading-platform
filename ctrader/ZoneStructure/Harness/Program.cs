@@ -35,7 +35,7 @@ internal static class Program
     const int MaxZonesPerSide = 4;
     const double SlBufferUsd = 1.5, MinSlUsd = 3.0, MaxSlUsd = 60.0, MinRR = 1.0, TargetOffsetUsd = 0.5;
 
-    class Bar { public double O, H, L, C; }
+    public class Bar { public double O, H, L, C; }
 
     class GuardedSeries
     {
@@ -58,7 +58,7 @@ internal static class Program
         public double Hi, Lo; public bool Bull, Star, FreshAtArm; public int OriginAbs, ArmedAtBar;
     }
 
-    class Entry
+    public class Entry
     {
         public int BarIdx; public bool Long; public double Px, Sl, Tp, SlUsd, RR; public string TrigType;
     }
@@ -90,12 +90,15 @@ internal static class Program
         Check(totalTriggersNoZone > 0, "zone gate actually rejects zone-less triggers (selectivity is real)");
         Check(totalArmed >= totalEntries, "every entry consumed an armed zone");
 
+        EquivTests.RunAll();
+        _failures += EquivTests.Failures;
+
         Console.WriteLine(_failures == 0 ? "\nALL CHECKS PASSED" : $"\n{_failures} CHECK(S) FAILED");
         Environment.Exit(_failures == 0 ? 0 : 1);
     }
 
     // ── Synthetic M15 series: regime-switching drift random walk ───────────
-    static List<Bar> GenM15(int seed, int n)
+    public static List<Bar> GenM15(int seed, int n)
     {
         var rng = new Random(seed * 7919);
         var bars = new List<Bar>(n);
@@ -126,7 +129,7 @@ internal static class Program
         return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
     }
 
-    static List<Bar> Aggregate(List<Bar> src, int k, int completedSrc)
+    public static List<Bar> Aggregate(List<Bar> src, int k, int completedSrc)
     {
         var outBars = new List<Bar>();
         for (int start = 0; start + k <= completedSrc + 1; start += k)
@@ -139,7 +142,7 @@ internal static class Program
     }
 
     // ── The bot loop, mirrored ──────────────────────────────────────────────
-    static (List<Entry> entries, int triggersNoZone, int zonesArmed, int alignBlocked) Simulate(List<Bar> m15raw)
+    public static (List<Entry> entries, int triggersNoZone, int zonesArmed, int alignBlocked) Simulate(List<Bar> m15raw, int h4Look = H4Lookback, int d1Look = D1Lookback, int m15Look = M15Lookback)
     {
         var m15 = new GuardedSeries(m15raw);
         var entries = new List<Entry>();
@@ -171,7 +174,7 @@ internal static class Program
             if (h4Completed != lastH4 && h4Completed > SwingStrength * 2 + 5)
             {
                 var all = Aggregate(m15raw, 16, m);
-                int from = Math.Max(0, all.Count - H4Lookback);
+                int from = Math.Max(0, all.Count - h4Look);
                 h4Candles = all.Skip(from).Select((b, i) => new Smc.Candle { Index = from + i, Open = b.O, High = b.H, Low = b.L, Close = b.C }).ToList();
                 h4Map = Smc.Compute(h4Candles, SwingStrength, MaxZonesPerSide);
                 lastH4 = h4Completed;
@@ -180,7 +183,7 @@ internal static class Program
             if (d1Completed != lastD1 && d1Completed > SwingStrength * 2 + 5)
             {
                 var all = Aggregate(m15raw, 96, m);
-                int from = Math.Max(0, all.Count - D1Lookback);
+                int from = Math.Max(0, all.Count - d1Look);
                 d1Candles = all.Skip(from).Select((b, i) => new Smc.Candle { Index = from + i, Open = b.O, High = b.H, Low = b.L, Close = b.C }).ToList();
                 d1Map = Smc.Compute(d1Candles, SwingStrength, MaxZonesPerSide);
                 lastD1 = d1Completed;
@@ -212,7 +215,7 @@ internal static class Program
             }
 
             // M15 trigger on the just-completed bar
-            int fromM = Math.Max(0, m - M15Lookback + 1);
+            int fromM = Math.Max(0, m - m15Look + 1);
             var m15Candles = new List<Smc.Candle>(m - fromM + 1);
             for (int i = fromM; i <= m; i++)
                 m15Candles.Add(new Smc.Candle { Index = i, Open = m15[i].O, High = m15[i].H, Low = m15[i].L, Close = m15[i].C });
