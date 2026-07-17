@@ -206,7 +206,7 @@ internal static class EquivTests
             {
                 foreach (var z in h4Zones)
                 {
-                    if (z.Bull != wantLong || !z.Fresh || consumed.Contains(z.OriginAbs)) continue;
+                    if (z.Bull != wantLong || consumed.Contains(z.OriginAbs)) continue;
                     bool touchedZ = z.Bull ? lo <= z.Hi && close >= z.Lo : hi >= z.Lo && close <= z.Hi;
                     if (!touchedZ) continue;
                     if (!StreamInPocket(h4Eng, z)) continue;

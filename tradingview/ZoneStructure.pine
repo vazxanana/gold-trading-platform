@@ -22,7 +22,7 @@ indicator("ZoneStructure SMC (H4 zones + M15 ChoCh)", "ZoneStructure", overlay =
 dirOpt     = input.string("Both", "Trade direction", options = ["Both", "Long", "Short"])
 trigOpt    = input.string("ChoCh or BOS", "Entry trigger", options = ["ChoCh only", "ChoCh or BOS"])
 swS        = input.int(3, "Swing strength (bars each side)", minval = 2)
-useFresh   = input.bool(true, "Require FRESH (unmitigated) zone")
+useFresh   = input.bool(false, "Require FRESH (unmitigated) zone")
 useD1      = input.bool(false, "Require D1 trend alignment")
 expiryBars = input.int(192, "Zone armed expiry (chart bars)", minval = 4)
 tfZone     = input.timeframe("240", "Zone/trend timeframe")

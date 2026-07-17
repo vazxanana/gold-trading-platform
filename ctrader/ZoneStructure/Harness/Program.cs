@@ -28,7 +28,7 @@ internal static class Program
 {
     // Mirror of the bot's defaults
     const int SwingStrength = 3;
-    const bool RequireFreshZone = true;
+    const bool RequireFreshZone = false;
     const bool RequireDailyAlignment = false;
     const int ZoneExpiryBars = 192;
     const int H4Lookback = 600, D1Lookback = 300, M15Lookback = 400;
@@ -97,8 +97,9 @@ internal static class Program
 
     static int _failures;
 
-    static void Main()
+    static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "diag") { Diag.Run(); return; }
         int totalEntries = 0, totalTriggersNoZone = 0, totalArmed = 0, totalAlignBlocked = 0;
 
         for (int seed = 1; seed <= 10; seed++)

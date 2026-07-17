@@ -57,7 +57,12 @@ namespace cAlgo.Robots
         [Parameter("Swing strength (bars each side)", Group = "Signal", DefaultValue = 3, MinValue = 2)]
         public int SwingStrength { get; set; }
 
-        [Parameter("Require FRESH (unmitigated) zone", Group = "Signal", DefaultValue = true)]
+        // On real H4 gold data zones lose freshness within hours (the first
+        // shallow re-tap after the breakdown), while the tradeable pullback
+        // arrives days later — requiring FRESH starved the 2026 run to zero
+        // armings in 5.5 months. Selectivity comes from the golden pocket,
+        // the once-per-zone rule, and invalidation instead.
+        [Parameter("Require FRESH (unmitigated) zone", Group = "Signal", DefaultValue = false)]
         public bool RequireFreshZone { get; set; }
 
         // D1 structure flips confirm late, so it is often out of sync with H4
@@ -161,6 +166,24 @@ namespace cAlgo.Robots
 
         private DateTime _tradeCountDate = DateTime.MinValue;
         private int _tradesToday;
+        private DateTime _lastDiagDate = DateTime.MinValue;
+
+        // weekly picture of what the zone layer sees — makes a silent week
+        // self-explaining in the backtest log
+        private void PrintZoneInventory(DateTime date)
+        {
+            var st = _h4Map.State;
+            Print("[DIAG] {0:yyyy-MM-dd} H4={1} protected={2:F2} zones in view: {3}",
+                date, st.Trend, st.ProtectedPrice ?? 0, _h4Map.Zones.Count);
+            foreach (var z in _h4Map.Zones)
+            {
+                double bLo, bHi;
+                bool pocket = InGoldenPocket(z, out bLo, out bHi);
+                Print("[DIAG]   {0} {1:F2}-{2:F2} fresh={3} pocket={4} (band {5:F2}-{6:F2}) consumed={7}",
+                    z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Fresh, pocket, bLo, bHi,
+                    _consumedZones.Contains(z.OriginAbs));
+            }
+        }
 
         protected override void OnStart()
         {
@@ -207,6 +230,12 @@ namespace cAlgo.Robots
 
             UpdateHigherTfMaps();
             if (_h4Map == null || _h4Map.State == null) return;
+
+            if (DebugDiagnostics && barDate != _lastDiagDate && barDate.DayOfWeek == DayOfWeek.Monday)
+            {
+                _lastDiagDate = barDate;
+                PrintZoneInventory(barDate);
+            }
 
             string trend = _h4Map.State.Trend;              // "bull" | "bear"
             if (trend != _lastH4Trend)
