@@ -116,14 +116,14 @@ internal static class EquivTests
     // ── Test B: full signal loop driven by streaming engines ────────────────
     // Mirrors Program.Simulate gate-for-gate; only the structure source
     // differs (streaming engines instead of batch recomputes).
-    class StreamedEntry { public int BarIdx; public bool Long; public double Sl, Tp; }
+    public class StreamedEntry { public int BarIdx; public bool Long; public double Sl, Tp; }
 
-    static bool StreamInPocket(StreamEngine eng, StreamEngine.ZView z)
+    static bool StreamPocketBand(StreamEngine eng, out double bandLo, out double bandHi, out int legId)
     {
+        bandLo = 0; bandHi = 0; legId = 0;
         if (eng.Trend == null || eng.Protected == null || eng.ProtectedIdx == null) return false;
         int from = eng.ProtectedIdx.Value;
         if (from >= eng.Bars.Count) return false;
-        double bandLo, bandHi;
         if (eng.Trend == "bear")
         {
             double legHigh = eng.Protected.Value, legLow = double.MaxValue;
@@ -142,14 +142,23 @@ internal static class EquivTests
             bandLo = legHigh - 0.79 * range;
             bandHi = legHigh - 0.60 * range;
         }
+        legId = -(eng.ProtectedIdx.Value + 1);
+        return true;
+    }
+
+    static bool StreamInPocket(StreamEngine eng, StreamEngine.ZView z)
+    {
+        double bandLo, bandHi; int legId;
+        if (!StreamPocketBand(eng, out bandLo, out bandHi, out legId)) return false;
         return z.Lo <= bandHi && z.Hi >= bandLo;
     }
 
-    static List<StreamedEntry> SimulateStream(List<Program.Bar> m15raw)
+    public static List<StreamedEntry> SimulateStream(List<Program.Bar> m15raw)
     {
         var entries = new List<StreamedEntry>();
         var armed = new List<(double Hi, double Lo, bool Bull, int OriginAbs, int ArmedAtBar)>();
         var consumed = new HashSet<int>();
+        var legLastEntry = new Dictionary<int, int>();
 
         var h4Eng = new StreamEngine(3);
         var d1Eng = new StreamEngine(3);
@@ -193,7 +202,7 @@ internal static class EquivTests
             if (h4Eng.Bars.Count <= 3 * 2 + 5 || h4Eng.Trend == null) continue;
 
             string trend = h4Eng.Trend;
-            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); lastTrend = trend; }
+            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); legLastEntry.Clear(); lastTrend = trend; }
             bool wantLong = trend == "bull";
 
             double hi = cur.H, lo = cur.L, close = cur.C;
@@ -213,6 +222,28 @@ internal static class EquivTests
                     int ex = armed.FindIndex(a => a.OriginAbs == z.OriginAbs && a.Bull == z.Bull);
                     if (ex >= 0) { armed[ex] = (armed[ex].Hi, armed[ex].Lo, armed[ex].Bull, armed[ex].OriginAbs, m); continue; }
                     armed.Add((z.Hi, z.Lo, z.Bull, z.OriginAbs, m));
+                }
+            }
+
+            {
+                double pbLo, pbHi; int legId;
+                if (StreamPocketBand(h4Eng, out pbLo, out pbHi, out legId))
+                {
+                    int touchBar = -1;
+                    for (int b = m; b >= Math.Max(0, m - 192); b--)
+                    {
+                        bool t = wantLong ? m15raw[b].L <= pbHi && m15raw[b].C >= pbLo : m15raw[b].H >= pbLo && m15raw[b].C <= pbHi;
+                        if (t) { touchBar = b; break; }
+                    }
+                    int lastEntryB;
+                    if (touchBar >= 0 && legLastEntry.TryGetValue(legId, out lastEntryB) && touchBar <= lastEntryB)
+                        touchBar = -1;
+                    if (touchBar >= 0)
+                    {
+                        int ex = armed.FindIndex(a => a.OriginAbs == legId);
+                        if (ex >= 0) armed[ex] = (armed[ex].Hi, armed[ex].Lo, armed[ex].Bull, armed[ex].OriginAbs, Math.Max(armed[ex].ArmedAtBar, touchBar));
+                        else armed.Add((pbHi, pbLo, wantLong, legId, touchBar));
+                    }
                 }
             }
 
@@ -255,7 +286,8 @@ internal static class EquivTests
             posOpen = true; posLong = wantLong;
             posSl = wantLong ? entry - slUsd : entry + slUsd;
             posTp = tpPrice;
-            consumed.Add(zone.OriginAbs);
+            if (zone.OriginAbs < 0) legLastEntry[zone.OriginAbs] = m;
+            else consumed.Add(zone.OriginAbs);
             armed.RemoveAll(a => a.OriginAbs == zone.OriginAbs && a.Bull == zone.Bull);
             entries.Add(new StreamedEntry { BarIdx = m, Long = wantLong, Sl = posSl, Tp = posTp });
         }

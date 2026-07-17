@@ -39,13 +39,13 @@ internal static class Program
 
     // mirror of the bot's InGoldenPocket: fib band over the CURRENT trend
     // leg (protected origin extreme -> running extreme), zone must overlap
-    public static bool InPocket(Smc.StructureMap map, List<Smc.Candle> h4c, Smc.Zone z)
+    public static bool TryPocketBand(Smc.StructureMap map, List<Smc.Candle> h4c, out double bandLo, out double bandHi, out int legId)
     {
+        bandLo = 0; bandHi = 0; legId = 0;
         var st = map.State;
         if (st == null || st.ProtectedPrice == null || st.ProtectedIdx == null) return false;
         int pos = st.ProtectedIdx.Value - h4c[0].Index;
         if (pos < 0 || pos >= h4c.Count) return false;
-        double bandLo, bandHi;
         if (st.Trend == "bear")
         {
             double legHigh = st.ProtectedPrice.Value, legLow = double.MaxValue;
@@ -64,6 +64,14 @@ internal static class Program
             bandLo = legHigh - FibMax * range;
             bandHi = legHigh - FibMin * range;
         }
+        legId = -(st.ProtectedIdx.Value + 1);
+        return true;
+    }
+
+    public static bool InPocket(Smc.StructureMap map, List<Smc.Candle> h4c, Smc.Zone z)
+    {
+        double bandLo, bandHi; int legId;
+        if (!TryPocketBand(map, h4c, out bandLo, out bandHi, out legId)) return false;
         return z.Lo <= bandHi && z.Hi >= bandLo;
     }
 
@@ -100,6 +108,7 @@ internal static class Program
     static void Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "diag") { Diag.Run(); return; }
+        if (args.Length > 0 && args[0] == "replay") { Replay.Run(); return; }
         int totalEntries = 0, totalTriggersNoZone = 0, totalArmed = 0, totalAlignBlocked = 0;
 
         for (int seed = 1; seed <= 10; seed++)
@@ -181,6 +190,7 @@ internal static class Program
         var entries = new List<Entry>();
         var armed = new List<ArmedZone>();
         var consumed = new HashSet<int>();
+        var legLastEntry = new Dictionary<int, int>();
         int triggersNoZone = 0, zonesArmed = 0, alignBlocked = 0;
 
         Smc.StructureMap h4Map = null, d1Map = null;
@@ -224,7 +234,7 @@ internal static class Program
             if (h4Map == null || h4Map.State == null) continue;
 
             string trend = h4Map.State.Trend;
-            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); lastTrend = trend; }
+            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); legLastEntry.Clear(); lastTrend = trend; }
             bool wantLong = trend == "bull";
 
             // arm / expire zones (mirror of ArmAndExpireZones)
@@ -246,6 +256,32 @@ internal static class Program
                 if (existing != null) { existing.ArmedAtBar = m; continue; }
                 armed.Add(new ArmedZone { Hi = z.Hi, Lo = z.Lo, Bull = z.Bull, Star = z.Star, FreshAtArm = z.Fresh, OriginAbs = z.OriginAbs, ArmedAtBar = m });
                 zonesArmed++;
+            }
+
+            {
+                double pbLo, pbHi; int legId;
+                if (UseFibFilter && TryPocketBand(h4Map, h4Candles, out pbLo, out pbHi, out legId))
+                {
+                    int touchBar = -1;
+                    for (int b = m; b >= Math.Max(0, m - ZoneExpiryBars); b--)
+                    {
+                        bool t = wantLong ? m15[b].L <= pbHi && m15[b].C >= pbLo : m15[b].H >= pbLo && m15[b].C <= pbHi;
+                        if (t) { touchBar = b; break; }
+                    }
+                    int lastEntryB;
+                    if (touchBar >= 0 && legLastEntry.TryGetValue(legId, out lastEntryB) && touchBar <= lastEntryB)
+                        touchBar = -1;
+                    if (touchBar >= 0)
+                    {
+                        var ex = armed.FirstOrDefault(a => a.OriginAbs == legId);
+                        if (ex != null) ex.ArmedAtBar = Math.Max(ex.ArmedAtBar, touchBar);
+                        else
+                        {
+                            armed.Add(new ArmedZone { Hi = pbHi, Lo = pbLo, Bull = wantLong, Star = false, FreshAtArm = true, OriginAbs = legId, ArmedAtBar = touchBar });
+                            zonesArmed++;
+                        }
+                    }
+                }
             }
 
             // M15 trigger on the just-completed bar

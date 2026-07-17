@@ -163,6 +163,7 @@ namespace cAlgo.Robots
         private readonly List<ArmedZone> _armed = new List<ArmedZone>();
         private readonly HashSet<int> _consumedZones = new HashSet<int>();  // H4 origin indices already traded
         private readonly HashSet<int> _fibRejected = new HashSet<int>();    // logged-once fib rejections
+        private readonly Dictionary<int, int> _legLastEntryBar = new Dictionary<int, int>();  // pocket-band re-entry guard: one trade per band visit
 
         private DateTime _tradeCountDate = DateTime.MinValue;
         private int _tradesToday;
@@ -245,6 +246,7 @@ namespace cAlgo.Robots
                 _armed.Clear();
                 _consumedZones.Clear();
                 _fibRejected.Clear();
+                _legLastEntryBar.Clear();
                 _lastH4Trend = trend;
             }
             string d1Trend = _d1Map != null && _d1Map.State != null ? _d1Map.State.Trend : null;
@@ -355,7 +357,8 @@ namespace cAlgo.Robots
             if (result.IsSuccessful)
             {
                 _tradesToday++;
-                _consumedZones.Add(zone.OriginAbs);
+                if (zone.OriginAbs < 0) _legLastEntryBar[zone.OriginAbs] = last;
+                else _consumedZones.Add(zone.OriginAbs);
                 _armed.Remove(zone);
                 Print("[ENTER] {0} {1} @ {2:F2} on M15 {3} | zone {4:F2}-{5:F2}{6} (H4 origin {7:yyyy-MM-dd HH:mm}) | SL {8:F2} (${9:F2} via {10}) TP → {11} | RR {12:F2} | vol {13}",
                     tradeType, SymbolName, entry, trig.Type,
@@ -423,6 +426,49 @@ namespace cAlgo.Robots
                     z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Star ? " ★" : "", z.Fresh, bandLo, bandHi,
                     _h4.OpenTimes[z.OriginAbs], Bars.OpenTimes[last]);
             }
+
+            // The golden-pocket band of the CURRENT leg is itself an armable
+            // area — the reference charts enter on the pullback into the
+            // 0.60-0.79 retracement region, whether or not a thin origin
+            // order block sits exactly there.
+            double pbLo, pbHi; int legId;
+            if (UseFibFilter && TryPocketBand(out pbLo, out pbHi, out legId))
+            {
+                // retroactive touch: the band belongs to the CURRENT leg, but
+                // the visit into it often happens before the break that
+                // defines the leg registers (continuation setups) — so scan
+                // the recent past against today's band
+                int touchBar = -1;
+                int lookLimit = Math.Max(0, last - ZoneExpiryBars);
+                for (int b = last; b >= lookLimit; b--)
+                {
+                    bool t = wantLong
+                        ? Bars.LowPrices[b] <= pbHi && Bars.ClosePrices[b] >= pbLo
+                        : Bars.HighPrices[b] >= pbLo && Bars.ClosePrices[b] <= pbHi;
+                    if (t) { touchBar = b; break; }
+                }
+                // one trade per pocket VISIT: a new touch after the last
+                // entry re-arms the leg (the reference charts trade each
+                // pullback into the band, not just the first)
+                int lastEntry;
+                if (touchBar >= 0 && _legLastEntryBar.TryGetValue(legId, out lastEntry) && touchBar <= lastEntry)
+                    touchBar = -1;
+                if (touchBar >= 0)
+                {
+                    var ex = _armed.FirstOrDefault(a => a.OriginAbs == legId);
+                    if (ex != null) ex.ArmedAtBar = Math.Max(ex.ArmedAtBar, touchBar);
+                    else
+                    {
+                        _armed.Add(new ArmedZone
+                        {
+                            Hi = pbHi, Lo = pbLo, Bull = wantLong, Star = false,
+                            OriginAbs = legId, OriginTime = Bars.OpenTimes[touchBar], ArmedAtBar = touchBar
+                        });
+                        Print("[ZONE] armed pocket-band {0:F2}-{1:F2} of the current {2} leg (touched {3:yyyy-MM-dd HH:mm})",
+                            pbLo, pbHi, wantLong ? "bull" : "bear", Bars.OpenTimes[touchBar]);
+                    }
+                }
+            }
         }
 
         // The 0.68 confluence, measured the way it is drawn on a chart: fib
@@ -431,9 +477,9 @@ namespace cAlgo.Robots
         // retracement band of that leg. (Measuring a zone against its own
         // origin leg is degenerate — the origin block always sits at ~1.0
         // of itself — which is why the previous version never fired.)
-        private bool InGoldenPocket(Smc.Zone z, out double bandLo, out double bandHi)
+        private bool TryPocketBand(out double bandLo, out double bandHi, out int legId)
         {
-            bandLo = 0; bandHi = 0;
+            bandLo = 0; bandHi = 0; legId = 0;
             var st = _h4Map != null ? _h4Map.State : null;
             if (st == null || st.ProtectedPrice == null || st.ProtectedIdx == null) return false;
             int lastCompleted = _h4.ClosePrices.Count - 2;
@@ -457,6 +503,14 @@ namespace cAlgo.Robots
                 bandLo = legHigh - FibMax * range;
                 bandHi = legHigh - FibMin * range;
             }
+            legId = -(st.ProtectedIdx.Value + 1);   // negative: never collides with a zone origin index
+            return true;
+        }
+
+        private bool InGoldenPocket(Smc.Zone z, out double bandLo, out double bandHi)
+        {
+            int legId;
+            if (!TryPocketBand(out bandLo, out bandHi, out legId)) return false;
             return z.Lo <= bandHi && z.Hi >= bandLo;
         }
 
