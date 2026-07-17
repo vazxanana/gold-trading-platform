@@ -31,6 +31,7 @@ onePos     = input.bool(true, "One signal at a time (wait for SL/TP hit)")
 showZones  = input.bool(true, "Draw current zones")
 showTrade  = input.bool(true, "Draw signal zone box + label")
 showDiag   = input.bool(true, "Show diagnostics (armed tint + break marks)")
+showChartOB = input.bool(true, "Mark chart-TF order blocks (break origins)")
 
 color COL_DEMAND = #4ADE80
 color COL_SUPPLY = #FB7185
@@ -199,6 +200,9 @@ f_engine(needView) =>
     evU = 0
     float evP = na
     int evI = na
+    float evZhi = na
+    float evZlo = na
+    float evZot = na
     if i >= swS * 2
         j = i - swS
         pH = array.get(aH, j)
@@ -251,6 +255,9 @@ f_engine(needView) =>
                 evI := hiIdx
                 org = f_legOrigin(aH, aL, hiIdx, i, true)
                 f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, true, trendI != 1, i)
+                evZhi := array.get(znHi, array.size(znHi) - 1)
+                evZlo := array.get(znLo, array.size(znLo) - 1)
+                evZot := array.get(znOt, array.size(znOt) - 1)
                 loIdx := org
                 loPrice := array.get(aL, org)
                 loSwept := false
@@ -269,6 +276,9 @@ f_engine(needView) =>
                 evI := loIdx
                 org = f_legOrigin(aH, aL, loIdx, i, false)
                 f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, false, trendI != -1, i)
+                evZhi := array.get(znHi, array.size(znHi) - 1)
+                evZlo := array.get(znLo, array.size(znLo) - 1)
+                evZot := array.get(znOt, array.size(znOt) - 1)
                 hiIdx := org
                 hiPrice := array.get(aH, org)
                 hiSwept := false
@@ -481,16 +491,16 @@ f_engine(needView) =>
         A4 := array.size(highsA) > 3 ? array.get(highsA, 3) : na
 
     prot = trendI == 1 ? loPrice : trendI == -1 ? hiPrice : na
-    [evC, evU, evP, evI, trendI, prot, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, A1, A2, A3, A4]
+    [evC, evU, evP, evI, evZhi, evZlo, evZot, trendI, prot, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, A1, A2, A3, A4]
 
 // confirmed-bar wrapper: [1] + lookahead_on = state as of the last COMPLETED
 // higher-TF bar on every chart bar — no repaint, no look-ahead
 f_conf() =>
-    [eC, eU, eP, eI, tI, pr, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8] = f_engine(true)
+    [eC, eU, eP, eI, eZh, eZl, eZo, tI, pr, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8] = f_engine(true)
     [tI[1], q1[1], q2[1], q3[1], q4[1], q5[1], q6[1], q7[1], q8[1], q9[1], q10[1], q11[1], q12[1], q13[1], q14[1], q15[1], q16[1], q17[1], q18[1], q19[1], q20[1], q21[1], q22[1], q23[1], q24[1], q25[1], q26[1], q27[1], q28[1], q29[1], q30[1], q31[1], q32[1], w1[1], w2[1], w3[1], w4[1], w5[1], w6[1], w7[1], w8[1]]
 
 // ── Engine instances: chart (trigger), zone TF, target TF ───────────────────
-[evCode, evUp, evPrice, evI1, m15Trend, m15Prot, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40] = f_engine(false)
+[evCode, evUp, evPrice, evI1, evZhi, evZlo, evZot, m15Trend, m15Prot, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40] = f_engine(false)
 
 [zTrend, zs1hi, zs1lo, zs1fr, zs1ot, zs2hi, zs2lo, zs2fr, zs2ot, zs3hi, zs3lo, zs3fr, zs3ot, zs4hi, zs4lo, zs4fr, zs4ot, zd1hi, zd1lo, zd1fr, zd1ot, zd2hi, zd2lo, zd2fr, zd2ot, zd3hi, zd3lo, zd3fr, zd3ot, zd4hi, zd4lo, zd4fr, zd4ot, zl1, zl2, zl3, zl4, zh1, zh2, zh3, zh4] = request.security(syminfo.tickerid, tfZone, f_conf(), lookahead = barmerge.lookahead_on)
 
@@ -553,6 +563,8 @@ var int sigCount = 0
 var int cntTrig = 0
 var int cntTrigNoZone = 0
 var int cntArmEvents = 0
+var int cntSlBlock = 0
+var int cntRrBlock = 0
 
 sigLong = false
 sigShort = false
@@ -644,6 +656,8 @@ if barstate.isconfirmed
                 slAnchor = anchorOk ? m15Prot : wantLong ? azl : azh
                 slUsd = wantLong ? entry - (slAnchor - slBuf) : (slAnchor + slBuf) - entry
                 slUsd := math.max(slUsd, minSl)
+                if slUsd > maxSl
+                    cntSlBlock += 1
                 if slUsd <= maxSl
                     // TP: nearest unswept swing beyond price clearing MinRR
                     cand = array.new<float>()
@@ -667,6 +681,8 @@ if barstate.isconfirmed
                                 reward = wantLong ? tp - entry : entry - tp
                                 if reward > 0 and reward / slUsd >= minRR
                                     tpPick := tp
+                    if na(tpPick)
+                        cntRrBlock += 1
                     if not na(tpPick)
                         sigLong := wantLong
                         sigShort := not wantLong
@@ -707,6 +723,36 @@ if showTrade and (sigLong or sigShort)
     txt = (sigLong ? "LONG " : "SHORT ") + str.tostring(close, format.mintick) + "\nSL " + str.tostring(sigSl, format.mintick) + " · TP " + str.tostring(sigTp, format.mintick) + "\nRR " + str.tostring(sigRR, "#.##")
     label.new(bar_index, sigLong ? low : high, txt, style = sigLong ? label.style_label_up : label.style_label_down, color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 20), textcolor = color.white, size = size.small)
 
+// chart-TF order blocks: the zone stamped at the origin of every chart-TF
+// structure break — after a break, price tends to return to this block.
+// Box appears at the break, extends right while alive, freezes when a body
+// closes through its far side (invalidated).
+var cobBox = array.new<box>()
+var cobHi = array.new<float>()
+var cobLo = array.new<float>()
+var cobBull = array.new<bool>()
+if showChartOB and barstate.isconfirmed
+    ci = array.size(cobBox) - 1
+    while ci >= 0
+        cbull = array.get(cobBull, ci)
+        dead = cbull ? close < array.get(cobLo, ci) : close > array.get(cobHi, ci)
+        if dead
+            array.remove(cobBox, ci)
+            array.remove(cobHi, ci)
+            array.remove(cobLo, ci)
+            array.remove(cobBull, ci)
+        else
+            box.set_right(array.get(cobBox, ci), time)
+        ci -= 1
+    if evCode > 0 and not na(evZhi)
+        cBull = evUp == 1
+        cc = cBull ? COL_DEMAND : COL_SUPPLY
+        cbx = box.new(left = math.round(evZot), top = evZhi, right = time, bottom = evZlo, xloc = xloc.bar_time, bgcolor = color.new(cc, 86), border_color = color.new(cc, 45))
+        array.push(cobBox, cbx)
+        array.push(cobHi, evZhi)
+        array.push(cobLo, evZlo)
+        array.push(cobBull, cBull)
+
 // order-block boxes: created when a zone first appears in the higher-TF
 // view, extended and re-tinted while it lives, frozen when it dies
 var obKey = array.new<float>()
@@ -736,7 +782,7 @@ if showZones and barstate.isconfirmed
                 array.push(obBox, bx)
 
 // ── Status table (the cBot's [GATE] diagnostics, on-chart) ──────────────────
-var table info = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 40))
+var table info = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 40))
 if barstate.islast
     table.cell(info, 0, 0, "H4 trend", text_color = color.gray, text_size = size.small)
     table.cell(info, 1, 0, zTrendS == 1 ? "BULL" : zTrendS == -1 ? "BEAR" : "—", text_color = zTrendS == 1 ? COL_DEMAND : zTrendS == -1 ? COL_SUPPLY : color.gray, text_size = size.small)
@@ -754,8 +800,12 @@ if barstate.islast
     table.cell(info, 1, 5, str.tostring(cntTrig), text_color = color.white, text_size = size.small)
     table.cell(info, 0, 6, "Triggers w/o armed zone", text_color = color.gray, text_size = size.small)
     table.cell(info, 1, 6, str.tostring(cntTrigNoZone), text_color = color.white, text_size = size.small)
-    table.cell(info, 0, 7, "SIGNALS", text_color = color.yellow, text_size = size.small)
-    table.cell(info, 1, 7, str.tostring(sigCount), text_color = color.yellow, text_size = size.small)
+    table.cell(info, 0, 7, "Blocked: SL > max", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 7, str.tostring(cntSlBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 8, "Blocked: no target ≥ minRR", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 8, str.tostring(cntRrBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 9, "SIGNALS", text_color = color.yellow, text_size = size.small)
+    table.cell(info, 1, 9, str.tostring(sigCount), text_color = color.yellow, text_size = size.small)
 
 alertcondition(sigLong, "ZoneStructure LONG", "ZoneStructure: LONG signal (H4 demand zone + M15 ChoCh up)")
 alertcondition(sigShort, "ZoneStructure SHORT", "ZoneStructure: SHORT signal (H4 supply zone + M15 ChoCh down)")
