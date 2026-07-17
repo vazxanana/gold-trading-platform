@@ -116,6 +116,23 @@ internal static class EquivTests
     // differs (streaming engines instead of batch recomputes).
     class StreamedEntry { public int BarIdx; public bool Long; public double Sl, Tp; }
 
+    static double StreamFibRetr(StreamEngine eng, StreamEngine.ZView z)
+    {
+        double mid = (z.Hi + z.Lo) / 2.0;
+        if (z.OriginAbs + 1 >= eng.Bars.Count) return -1;
+        if (!z.Bull)
+        {
+            double ext = double.MaxValue;
+            for (int k = z.OriginAbs + 1; k < eng.Bars.Count; k++) ext = Math.Min(ext, eng.Bars[k].L);
+            double den = z.Hi - ext;
+            return den <= 0 ? -1 : (mid - ext) / den;
+        }
+        double ext2 = double.MinValue;
+        for (int k = z.OriginAbs + 1; k < eng.Bars.Count; k++) ext2 = Math.Max(ext2, eng.Bars[k].H);
+        double den2 = ext2 - z.Lo;
+        return den2 <= 0 ? -1 : (ext2 - mid) / den2;
+    }
+
     static List<StreamedEntry> SimulateStream(List<Program.Bar> m15raw)
     {
         var entries = new List<StreamedEntry>();
@@ -180,6 +197,8 @@ internal static class EquivTests
                     if (z.Bull != wantLong || !z.Fresh || consumed.Contains(z.OriginAbs)) continue;
                     bool touchedZ = z.Bull ? lo <= z.Hi && close >= z.Lo : hi >= z.Lo && close <= z.Hi;
                     if (!touchedZ) continue;
+                    double retr = StreamFibRetr(h4Eng, z);
+                    if (retr < 0.60 || retr > 0.79) continue;
                     int ex = armed.FindIndex(a => a.OriginAbs == z.OriginAbs && a.Bull == z.Bull);
                     if (ex >= 0) { armed[ex] = (armed[ex].Hi, armed[ex].Lo, armed[ex].Bull, armed[ex].OriginAbs, m); continue; }
                     armed.Add((z.Hi, z.Lo, z.Bull, z.OriginAbs, m));

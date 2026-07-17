@@ -32,9 +32,13 @@ showZones  = input.bool(true, "Draw current zones")
 showTrade  = input.bool(true, "Draw signal zone box + label")
 showDiag   = input.bool(true, "Show diagnostics (armed tint + break marks)")
 showChartOB = input.bool(true, "Mark chart-TF order blocks (break origins)")
+useFib     = input.bool(true, "Golden pocket filter (arm only zones near fib ~0.68)")
+fibMin     = input.float(0.60, "Fib retracement min", step = 0.01)
+fibMax     = input.float(0.79, "Fib retracement max", step = 0.01)
 
 color COL_DEMAND = #4ADE80
 color COL_SUPPLY = #FB7185
+color COL_GOLD = #FBBF24
 
 // ── Engine helpers ──────────────────────────────────────────────────────────
 // alternation rule: consecutive same-side pivots collapse into the extreme
@@ -565,6 +569,11 @@ var int cntTrigNoZone = 0
 var int cntArmEvents = 0
 var int cntSlBlock = 0
 var int cntRrBlock = 0
+var int cntFibBlock = 0
+var fibKey = array.new<float>()
+var fibExt = array.new<float>()
+var fibRejSeen = array.new<float>()
+var gQual = array.new<float>()
 
 sigLong = false
 sigShort = false
@@ -576,6 +585,40 @@ float sigZoneOt = na
 float sigRR = na
 
 if barstate.isconfirmed
+    // fib leg tracking: running extreme of each zone's leg since the zone
+    // first appeared (bot measures from the true origin; ext converges as
+    // the leg extends). Qualification: zone midpoint sits in [fibMin,fibMax]
+    // of the leg from zone origin extreme to the running extreme.
+    for fi = 0 to 7
+        fzh = array.get(gSlotHi, fi)
+        if not na(fzh)
+            fbull = fi >= 4
+            fkey = array.get(gSlotOt, fi) + (fbull ? 1 : 0)
+            fx = array.indexof(fibKey, fkey)
+            if fx >= 0
+                array.set(fibExt, fx, fbull ? math.max(array.get(fibExt, fx), high) : math.min(array.get(fibExt, fx), low))
+            else
+                array.push(fibKey, fkey)
+                array.push(fibExt, fbull ? high : low)
+    array.clear(gQual)
+    for fi = 0 to 7
+        float q = na
+        fzh = array.get(gSlotHi, fi)
+        if not na(fzh)
+            fzl = array.get(gSlotLo, fi)
+            fbull = fi >= 4
+            fkey = array.get(gSlotOt, fi) + (fbull ? 1 : 0)
+            fx = array.indexof(fibKey, fkey)
+            q := 0.0
+            if fx >= 0
+                fext = array.get(fibExt, fx)
+                fmid = (fzh + fzl) / 2.0
+                fden = fbull ? fext - fzl : fzh - fext
+                if fden > 0
+                    fretr = fbull ? (fext - fmid) / fden : (fmid - fext) / fden
+                    q := fretr >= fibMin and fretr <= fibMax ? 1.0 : 0.0
+        array.push(gQual, q)
+
     // 0. resolve the active signal with this bar
     if posActive
         if posLong ? low <= posSl : high >= posSl
@@ -619,7 +662,13 @@ if barstate.isconfirmed
                     zot = array.get(gSlotOt, si)
                     if not array.includes(consumed, zot)
                         touched = zbull ? low <= zh and close >= zl : high >= zl and close <= zh
-                        if touched
+                        fibOk = not useFib or nz(array.get(gQual, si), 0) >= 1
+                        if touched and not fibOk
+                            fkey2 = zot + (zbull ? 1 : 0)
+                            if not array.includes(fibRejSeen, fkey2)
+                                array.push(fibRejSeen, fkey2)
+                                cntFibBlock += 1
+                        if touched and fibOk
                             ei = array.indexof(armOt, zot)
                             if ei >= 0
                                 array.set(armAt, ei, bar_index)
@@ -769,20 +818,26 @@ if showZones and barstate.isconfirmed
             alpha = fr >= 2 ? 70 : fr >= 1 ? 80 : 92
             key = ot + (zbull ? 1 : 0)
             bi = array.indexof(obKey, key)
+            qual = nz(array.get(gQual, si), 0) >= 1
+            bc = qual ? color.new(COL_GOLD, 15) : color.new(baseC, 55)
+            btxt = (fr >= 1 ? "fresh" : "") + (qual ? " ★0.68" : "")
+            btc = qual ? color.new(COL_GOLD, 10) : color.new(baseC, 25)
             if bi >= 0
                 bx = array.get(obBox, bi)
                 box.set_right(bx, time)
                 box.set_top(bx, zh)
                 box.set_bottom(bx, zl)
                 box.set_bgcolor(bx, color.new(baseC, alpha))
-                box.set_text(bx, fr >= 1 ? "fresh" : "")
+                box.set_border_color(bx, bc)
+                box.set_text(bx, btxt)
+                box.set_text_color(bx, btc)
             else
-                bx = box.new(left = math.round(ot), top = zh, right = time, bottom = zl, xloc = xloc.bar_time, bgcolor = color.new(baseC, alpha), border_color = color.new(baseC, 55), text = fr >= 1 ? "fresh" : "", text_color = color.new(baseC, 25), text_size = size.tiny)
+                bx = box.new(left = math.round(ot), top = zh, right = time, bottom = zl, xloc = xloc.bar_time, bgcolor = color.new(baseC, alpha), border_color = bc, text = btxt, text_color = btc, text_size = size.tiny)
                 array.push(obKey, key)
                 array.push(obBox, bx)
 
 // ── Status table (the cBot's [GATE] diagnostics, on-chart) ──────────────────
-var table info = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 40))
+var table info = table.new(position.top_right, 2, 11, bgcolor = color.new(color.black, 40))
 if barstate.islast
     table.cell(info, 0, 0, "H4 trend", text_color = color.gray, text_size = size.small)
     table.cell(info, 1, 0, zTrendS == 1 ? "BULL" : zTrendS == -1 ? "BEAR" : "—", text_color = zTrendS == 1 ? COL_DEMAND : zTrendS == -1 ? COL_SUPPLY : color.gray, text_size = size.small)
@@ -804,8 +859,10 @@ if barstate.islast
     table.cell(info, 1, 7, str.tostring(cntSlBlock), text_color = color.white, text_size = size.small)
     table.cell(info, 0, 8, "Blocked: no target ≥ minRR", text_color = color.gray, text_size = size.small)
     table.cell(info, 1, 8, str.tostring(cntRrBlock), text_color = color.white, text_size = size.small)
-    table.cell(info, 0, 9, "SIGNALS", text_color = color.yellow, text_size = size.small)
-    table.cell(info, 1, 9, str.tostring(sigCount), text_color = color.yellow, text_size = size.small)
+    table.cell(info, 0, 9, "Zones blocked by fib", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 9, str.tostring(cntFibBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 10, "SIGNALS", text_color = color.yellow, text_size = size.small)
+    table.cell(info, 1, 10, str.tostring(sigCount), text_color = color.yellow, text_size = size.small)
 
 alertcondition(sigLong, "ZoneStructure LONG", "ZoneStructure: LONG signal (H4 demand zone + M15 ChoCh up)")
 alertcondition(sigShort, "ZoneStructure SHORT", "ZoneStructure: SHORT signal (H4 supply zone + M15 ChoCh down)")

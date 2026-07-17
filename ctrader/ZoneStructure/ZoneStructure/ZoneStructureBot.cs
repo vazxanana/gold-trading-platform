@@ -74,6 +74,18 @@ namespace cAlgo.Robots
         [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 96, MinValue = 4)]
         public int ZoneExpiryBars { get; set; }
 
+        // Golden pocket: a zone is only worth trading when it sits near the
+        // 0.68 retracement of its own breaking leg (leg extreme measured from
+        // the zone origin). Zones outside [FibMin, FibMax] never arm.
+        [Parameter("Golden pocket filter (fib ~0.68 zones)", Group = "Signal", DefaultValue = true)]
+        public bool UseFibFilter { get; set; }
+
+        [Parameter("Fib retracement min", Group = "Signal", DefaultValue = 0.60, MinValue = 0.0, Step = 0.01)]
+        public double FibMin { get; set; }
+
+        [Parameter("Fib retracement max", Group = "Signal", DefaultValue = 0.79, MinValue = 0.0, Step = 0.01)]
+        public double FibMax { get; set; }
+
         // ── Structure lookbacks ─────────────────────────────────────────────
         [Parameter("H4 lookback bars", Group = "Structure", DefaultValue = 600, MinValue = 120)]
         public int H4LookbackBars { get; set; }
@@ -144,6 +156,7 @@ namespace cAlgo.Robots
 
         private readonly List<ArmedZone> _armed = new List<ArmedZone>();
         private readonly HashSet<int> _consumedZones = new HashSet<int>();  // H4 origin indices already traded
+        private readonly HashSet<int> _fibRejected = new HashSet<int>();    // logged-once fib rejections
 
         private DateTime _tradeCountDate = DateTime.MinValue;
         private int _tradesToday;
@@ -162,8 +175,8 @@ namespace cAlgo.Robots
             EnsureHistory(_h4, H4LookbackBars + 20, "H4");
             EnsureHistory(_d1, D1LookbackBars + 10, "D1");
 
-            Print("[START] ZoneStructure on {0} {1} | dir={2} trigger={3} freshZone={4} d1Align={5}",
-                SymbolName, TimeFrame, TradeDirection, EntryTrigger, RequireFreshZone, RequireDailyAlignment);
+            Print("[START] ZoneStructure on {0} {1} | dir={2} trigger={3} freshZone={4} d1Align={5} fibFilter={6} [{7:F2}-{8:F2}]",
+                SymbolName, TimeFrame, TradeDirection, EntryTrigger, RequireFreshZone, RequireDailyAlignment, UseFibFilter, FibMin, FibMax);
             Print("[START] risk={0}% slMode={1} slBuffer=${2} minSL=${3} maxSL=${4} minRR={5} tgtOffset=${6} zoneExpiry={7} m15 bars",
                 RiskPercent, SlPlacement, SlBufferUsd, MinSlUsd, MaxSlUsd, MinRR, TargetOffsetUsd, ZoneExpiryBars);
             Print("[START] pip size = {0} → $1.00 = {1} pips on this symbol", Symbol.PipSize, 1.0 / Symbol.PipSize);
@@ -201,6 +214,7 @@ namespace cAlgo.Robots
                     trend, Bars.OpenTimes[last], _h4Map.State.ProtectedPrice ?? 0, _h4Map.State.NextPrice ?? 0);
                 _armed.Clear();
                 _consumedZones.Clear();
+                _fibRejected.Clear();
                 _lastH4Trend = trend;
             }
             string d1Trend = _d1Map != null && _d1Map.State != null ? _d1Map.State.Trend : null;
@@ -355,6 +369,15 @@ namespace cAlgo.Robots
                                       : hi >= z.Lo && close <= z.Hi;    // poked into supply, not closed through
                 if (!touched) continue;
 
+                double retr = FibRetracement(z);
+                if (UseFibFilter && (retr < FibMin || retr > FibMax))
+                {
+                    if (_fibRejected.Add(z.OriginAbs) && DebugDiagnostics)
+                        Print("[ZONE] skip {0} {1:F2}-{2:F2} — fib retr {3:F2} outside [{4:F2},{5:F2}]",
+                            z.Bull ? "demand" : "supply", z.Lo, z.Hi, retr, FibMin, FibMax);
+                    continue;
+                }
+
                 var existing = _armed.FirstOrDefault(a => a.OriginAbs == z.OriginAbs && a.Bull == z.Bull);
                 if (existing != null) { existing.ArmedAtBar = last; continue; }   // refresh expiry while price sits in it
 
@@ -365,9 +388,33 @@ namespace cAlgo.Robots
                     OriginTime = _h4.OpenTimes[z.OriginAbs],
                     ArmedAtBar = last
                 });
-                Print("[ZONE] armed {0} {1:F2}-{2:F2}{3} fresh={4} (H4 origin {5:yyyy-MM-dd HH:mm}) touched at {6:yyyy-MM-dd HH:mm}",
-                    z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Star ? " ★" : "", z.Fresh,
+                Print("[ZONE] armed {0} {1:F2}-{2:F2}{3} fresh={4} fib={5:F2} (H4 origin {6:yyyy-MM-dd HH:mm}) touched at {7:yyyy-MM-dd HH:mm}",
+                    z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Star ? " ★" : "", z.Fresh, retr,
                     _h4.OpenTimes[z.OriginAbs], Bars.OpenTimes[last]);
+            }
+        }
+
+        // fraction of the breaking leg that price must retrace to reach the
+        // zone's midpoint: leg start = zone origin extreme, leg end = extreme
+        // H4 price since the origin. ~0.68 = golden pocket.
+        private double FibRetracement(Smc.Zone z)
+        {
+            int lastCompleted = _h4.ClosePrices.Count - 2;
+            if (z.OriginAbs + 1 > lastCompleted) return -1;
+            double mid = (z.Hi + z.Lo) / 2.0;
+            if (!z.Bull)
+            {
+                double ext = double.MaxValue;
+                for (int k = z.OriginAbs + 1; k <= lastCompleted; k++) ext = Math.Min(ext, _h4.LowPrices[k]);
+                double den = z.Hi - ext;
+                return den <= 0 ? -1 : (mid - ext) / den;
+            }
+            else
+            {
+                double ext = double.MinValue;
+                for (int k = z.OriginAbs + 1; k <= lastCompleted; k++) ext = Math.Max(ext, _h4.HighPrices[k]);
+                double den = ext - z.Lo;
+                return den <= 0 ? -1 : (ext - mid) / den;
             }
         }
 
