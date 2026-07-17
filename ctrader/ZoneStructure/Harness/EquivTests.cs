@@ -85,6 +85,8 @@ internal static class EquivTests
         Check(batchTrend == se.Trend, $"{tag}: trend {batchTrend} vs {se.Trend}");
         double? bp = batch.State != null ? batch.State.ProtectedPrice : null;
         Check(NearEq(bp, se.Protected), $"{tag}: protected {bp} vs {se.Protected}");
+        int? bpi = batch.State != null ? batch.State.ProtectedIdx : null;
+        Check(bpi == se.ProtectedIdx, $"{tag}: protectedIdx {bpi} vs {se.ProtectedIdx}");
 
         Check(batch.Swings.Count == se.Swings.Count, $"{tag}: swing count {batch.Swings.Count} vs {se.Swings.Count}");
         for (int i = 0; i < Math.Min(batch.Swings.Count, se.Swings.Count); i++)
@@ -116,21 +118,31 @@ internal static class EquivTests
     // differs (streaming engines instead of batch recomputes).
     class StreamedEntry { public int BarIdx; public bool Long; public double Sl, Tp; }
 
-    static double StreamFibRetr(StreamEngine eng, StreamEngine.ZView z)
+    static bool StreamInPocket(StreamEngine eng, StreamEngine.ZView z)
     {
-        double mid = (z.Hi + z.Lo) / 2.0;
-        if (z.OriginAbs + 1 >= eng.Bars.Count) return -1;
-        if (!z.Bull)
+        if (eng.Trend == null || eng.Protected == null || eng.ProtectedIdx == null) return false;
+        int from = eng.ProtectedIdx.Value;
+        if (from >= eng.Bars.Count) return false;
+        double bandLo, bandHi;
+        if (eng.Trend == "bear")
         {
-            double ext = double.MaxValue;
-            for (int k = z.OriginAbs + 1; k < eng.Bars.Count; k++) ext = Math.Min(ext, eng.Bars[k].L);
-            double den = z.Hi - ext;
-            return den <= 0 ? -1 : (mid - ext) / den;
+            double legHigh = eng.Protected.Value, legLow = double.MaxValue;
+            for (int k = from; k < eng.Bars.Count; k++) legLow = Math.Min(legLow, eng.Bars[k].L);
+            double range = legHigh - legLow;
+            if (range <= 0) return false;
+            bandLo = legLow + 0.60 * range;
+            bandHi = legLow + 0.79 * range;
         }
-        double ext2 = double.MinValue;
-        for (int k = z.OriginAbs + 1; k < eng.Bars.Count; k++) ext2 = Math.Max(ext2, eng.Bars[k].H);
-        double den2 = ext2 - z.Lo;
-        return den2 <= 0 ? -1 : (ext2 - mid) / den2;
+        else
+        {
+            double legLow = eng.Protected.Value, legHigh = double.MinValue;
+            for (int k = from; k < eng.Bars.Count; k++) legHigh = Math.Max(legHigh, eng.Bars[k].H);
+            double range = legHigh - legLow;
+            if (range <= 0) return false;
+            bandLo = legHigh - 0.79 * range;
+            bandHi = legHigh - 0.60 * range;
+        }
+        return z.Lo <= bandHi && z.Hi >= bandLo;
     }
 
     static List<StreamedEntry> SimulateStream(List<Program.Bar> m15raw)
@@ -188,7 +200,7 @@ internal static class EquivTests
             for (int i = armed.Count - 1; i >= 0; i--)
             {
                 var z = armed[i];
-                if (m - z.ArmedAtBar > 96 || (z.Bull ? close < z.Lo : close > z.Hi)) armed.RemoveAt(i);
+                if (m - z.ArmedAtBar > 192 || (z.Bull ? close < z.Lo : close > z.Hi)) armed.RemoveAt(i);
             }
             if (h4Zones != null)
             {
@@ -197,8 +209,7 @@ internal static class EquivTests
                     if (z.Bull != wantLong || !z.Fresh || consumed.Contains(z.OriginAbs)) continue;
                     bool touchedZ = z.Bull ? lo <= z.Hi && close >= z.Lo : hi >= z.Lo && close <= z.Hi;
                     if (!touchedZ) continue;
-                    double retr = StreamFibRetr(h4Eng, z);
-                    if (retr < 0.60 || retr > 0.79) continue;
+                    if (!StreamInPocket(h4Eng, z)) continue;
                     int ex = armed.FindIndex(a => a.OriginAbs == z.OriginAbs && a.Bull == z.Bull);
                     if (ex >= 0) { armed[ex] = (armed[ex].Hi, armed[ex].Lo, armed[ex].Bull, armed[ex].OriginAbs, m); continue; }
                     armed.Add((z.Hi, z.Lo, z.Bull, z.OriginAbs, m));

@@ -30,32 +30,41 @@ internal static class Program
     const int SwingStrength = 3;
     const bool RequireFreshZone = true;
     const bool RequireDailyAlignment = false;
-    const int ZoneExpiryBars = 96;
+    const int ZoneExpiryBars = 192;
     const int H4Lookback = 600, D1Lookback = 300, M15Lookback = 400;
     const int MaxZonesPerSide = 4;
     const double SlBufferUsd = 1.5, MinSlUsd = 3.0, MaxSlUsd = 60.0, MinRR = 1.0, TargetOffsetUsd = 0.5;
     const bool UseFibFilter = true;
     const double FibMin = 0.60, FibMax = 0.79;
 
-    // mirror of the bot's FibRetracement: leg start = zone origin extreme,
-    // leg end = extreme H4 price since origin, fraction at the zone midpoint
-    public static double FibRetr(List<Smc.Candle> h4c, Smc.Zone z)
+    // mirror of the bot's InGoldenPocket: fib band over the CURRENT trend
+    // leg (protected origin extreme -> running extreme), zone must overlap
+    public static bool InPocket(Smc.StructureMap map, List<Smc.Candle> h4c, Smc.Zone z)
     {
-        double mid = (z.Hi + z.Lo) / 2.0;
-        int start = -1;
-        for (int i = 0; i < h4c.Count; i++) if (h4c[i].Index == z.OriginAbs) { start = i; break; }
-        if (start < 0 || start + 1 >= h4c.Count) return -1;
-        if (!z.Bull)
+        var st = map.State;
+        if (st == null || st.ProtectedPrice == null || st.ProtectedIdx == null) return false;
+        int pos = st.ProtectedIdx.Value - h4c[0].Index;
+        if (pos < 0 || pos >= h4c.Count) return false;
+        double bandLo, bandHi;
+        if (st.Trend == "bear")
         {
-            double ext = double.MaxValue;
-            for (int k = start + 1; k < h4c.Count; k++) ext = Math.Min(ext, h4c[k].Low);
-            double den = z.Hi - ext;
-            return den <= 0 ? -1 : (mid - ext) / den;
+            double legHigh = st.ProtectedPrice.Value, legLow = double.MaxValue;
+            for (int k = pos; k < h4c.Count; k++) legLow = Math.Min(legLow, h4c[k].Low);
+            double range = legHigh - legLow;
+            if (range <= 0) return false;
+            bandLo = legLow + FibMin * range;
+            bandHi = legLow + FibMax * range;
         }
-        double ext2 = double.MinValue;
-        for (int k = start + 1; k < h4c.Count; k++) ext2 = Math.Max(ext2, h4c[k].High);
-        double den2 = ext2 - z.Lo;
-        return den2 <= 0 ? -1 : (ext2 - mid) / den2;
+        else
+        {
+            double legLow = st.ProtectedPrice.Value, legHigh = double.MinValue;
+            for (int k = pos; k < h4c.Count; k++) legHigh = Math.Max(legHigh, h4c[k].High);
+            double range = legHigh - legLow;
+            if (range <= 0) return false;
+            bandLo = legHigh - FibMax * range;
+            bandHi = legHigh - FibMin * range;
+        }
+        return z.Lo <= bandHi && z.Hi >= bandLo;
     }
 
     public class Bar { public double O, H, L, C; }
@@ -231,11 +240,7 @@ internal static class Program
                 if (consumed.Contains(z.OriginAbs)) continue;
                 bool touched = z.Bull ? lo <= z.Hi && close >= z.Lo : hi >= z.Lo && close <= z.Hi;
                 if (!touched) continue;
-                if (UseFibFilter)
-                {
-                    double retr = FibRetr(h4Candles, z);
-                    if (retr < FibMin || retr > FibMax) continue;
-                }
+                if (UseFibFilter && !InPocket(h4Map, h4Candles, z)) continue;
                 var existing = armed.FirstOrDefault(a => a.OriginAbs == z.OriginAbs && a.Bull == z.Bull);
                 if (existing != null) { existing.ArmedAtBar = m; continue; }
                 armed.Add(new ArmedZone { Hi = z.Hi, Lo = z.Lo, Bull = z.Bull, Star = z.Star, FreshAtArm = z.Fresh, OriginAbs = z.OriginAbs, ArmedAtBar = m });

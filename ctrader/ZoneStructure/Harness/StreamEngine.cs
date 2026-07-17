@@ -41,6 +41,7 @@ internal class StreamEngine
     private SIdm _idm;
 
     public double? Protected => Trend == "bull" ? _lo?.Price : Trend == "bear" ? _hi?.Price : null;
+    public int? ProtectedIdx => Trend == "bull" ? _lo?.Idx : Trend == "bear" ? _hi?.Idx : null;
 
     public StreamEngine(int swingStrength) { _s = swingStrength; }
 

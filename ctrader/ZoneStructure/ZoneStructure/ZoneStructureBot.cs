@@ -69,14 +69,15 @@ namespace cAlgo.Robots
         [Parameter("M15 entry trigger", Group = "Signal", DefaultValue = EntryTriggerMode.ChochOrBos)]
         public EntryTriggerMode EntryTrigger { get; set; }
 
-        // H4 pullbacks take longer than a session to roll over — at 32 bars
-        // (8h) two thirds of armed zones expired before the M15 trigger came.
-        [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 96, MinValue = 4)]
+        // H4 pullbacks take longer than a session to roll over, and the
+        // reference-chart pullbacks span days — 192 M15 bars = 48h, refreshed
+        // while price keeps tapping the zone.
+        [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 192, MinValue = 4)]
         public int ZoneExpiryBars { get; set; }
 
-        // Golden pocket: a zone is only worth trading when it sits near the
-        // 0.68 retracement of its own breaking leg (leg extreme measured from
-        // the zone origin). Zones outside [FibMin, FibMax] never arm.
+        // Golden pocket: a zone is only worth trading when it overlaps the
+        // [FibMin, FibMax] retracement band of the CURRENT trend leg
+        // (protected origin extreme → running extreme since).
         [Parameter("Golden pocket filter (fib ~0.68 zones)", Group = "Signal", DefaultValue = true)]
         public bool UseFibFilter { get; set; }
 
@@ -369,12 +370,13 @@ namespace cAlgo.Robots
                                       : hi >= z.Lo && close <= z.Hi;    // poked into supply, not closed through
                 if (!touched) continue;
 
-                double retr = FibRetracement(z);
-                if (UseFibFilter && (retr < FibMin || retr > FibMax))
+                double bandLo = 0, bandHi = 0;
+                bool inPocket = !UseFibFilter || InGoldenPocket(z, out bandLo, out bandHi);
+                if (!inPocket)
                 {
                     if (_fibRejected.Add(z.OriginAbs) && DebugDiagnostics)
-                        Print("[ZONE] skip {0} {1:F2}-{2:F2} — fib retr {3:F2} outside [{4:F2},{5:F2}]",
-                            z.Bull ? "demand" : "supply", z.Lo, z.Hi, retr, FibMin, FibMax);
+                        Print("[ZONE] skip {0} {1:F2}-{2:F2} — outside golden pocket {3:F2}-{4:F2}",
+                            z.Bull ? "demand" : "supply", z.Lo, z.Hi, bandLo, bandHi);
                     continue;
                 }
 
@@ -388,34 +390,45 @@ namespace cAlgo.Robots
                     OriginTime = _h4.OpenTimes[z.OriginAbs],
                     ArmedAtBar = last
                 });
-                Print("[ZONE] armed {0} {1:F2}-{2:F2}{3} fresh={4} fib={5:F2} (H4 origin {6:yyyy-MM-dd HH:mm}) touched at {7:yyyy-MM-dd HH:mm}",
-                    z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Star ? " ★" : "", z.Fresh, retr,
+                Print("[ZONE] armed {0} {1:F2}-{2:F2}{3} fresh={4} pocket={5:F2}-{6:F2} (H4 origin {7:yyyy-MM-dd HH:mm}) touched at {8:yyyy-MM-dd HH:mm}",
+                    z.Bull ? "demand" : "supply", z.Lo, z.Hi, z.Star ? " ★" : "", z.Fresh, bandLo, bandHi,
                     _h4.OpenTimes[z.OriginAbs], Bars.OpenTimes[last]);
             }
         }
 
-        // fraction of the breaking leg that price must retrace to reach the
-        // zone's midpoint: leg start = zone origin extreme, leg end = extreme
-        // H4 price since the origin. ~0.68 = golden pocket.
-        private double FibRetracement(Smc.Zone z)
+        // The 0.68 confluence, measured the way it is drawn on a chart: fib
+        // over the CURRENT trend leg (protected origin extreme → extreme
+        // since), zone qualifies when it OVERLAPS the [FibMin, FibMax]
+        // retracement band of that leg. (Measuring a zone against its own
+        // origin leg is degenerate — the origin block always sits at ~1.0
+        // of itself — which is why the previous version never fired.)
+        private bool InGoldenPocket(Smc.Zone z, out double bandLo, out double bandHi)
         {
+            bandLo = 0; bandHi = 0;
+            var st = _h4Map != null ? _h4Map.State : null;
+            if (st == null || st.ProtectedPrice == null || st.ProtectedIdx == null) return false;
             int lastCompleted = _h4.ClosePrices.Count - 2;
-            if (z.OriginAbs + 1 > lastCompleted) return -1;
-            double mid = (z.Hi + z.Lo) / 2.0;
-            if (!z.Bull)
+            int from = st.ProtectedIdx.Value;
+            if (from > lastCompleted) return false;
+            if (st.Trend == "bear")
             {
-                double ext = double.MaxValue;
-                for (int k = z.OriginAbs + 1; k <= lastCompleted; k++) ext = Math.Min(ext, _h4.LowPrices[k]);
-                double den = z.Hi - ext;
-                return den <= 0 ? -1 : (mid - ext) / den;
+                double legHigh = st.ProtectedPrice.Value, legLow = double.MaxValue;
+                for (int k = from; k <= lastCompleted; k++) legLow = Math.Min(legLow, _h4.LowPrices[k]);
+                double range = legHigh - legLow;
+                if (range <= 0) return false;
+                bandLo = legLow + FibMin * range;
+                bandHi = legLow + FibMax * range;
             }
             else
             {
-                double ext = double.MinValue;
-                for (int k = z.OriginAbs + 1; k <= lastCompleted; k++) ext = Math.Max(ext, _h4.HighPrices[k]);
-                double den = ext - z.Lo;
-                return den <= 0 ? -1 : (ext - mid) / den;
+                double legLow = st.ProtectedPrice.Value, legHigh = double.MinValue;
+                for (int k = from; k <= lastCompleted; k++) legHigh = Math.Max(legHigh, _h4.HighPrices[k]);
+                double range = legHigh - legLow;
+                if (range <= 0) return false;
+                bandLo = legHigh - FibMax * range;
+                bandHi = legHigh - FibMin * range;
             }
+            return z.Lo <= bandHi && z.Hi >= bandLo;
         }
 
         // ── Higher-timeframe structure maps (completed bars only) ───────────
@@ -522,6 +535,7 @@ namespace cAlgo.Robots
             public string Trend;
             public bool Confirmed;
             public double? ProtectedPrice, NextPrice, IdmPrice;
+            public int? ProtectedIdx;          // absolute series index of the protected level
         }
 
         public class StructureMap
@@ -680,6 +694,7 @@ namespace cAlgo.Robots
                 Trend = trend,
                 Confirmed = lastBreak != null && lastBreak.Type == "bos",
                 ProtectedPrice = prot != null ? prot.Price : (double?)null,
+                ProtectedIdx = prot != null ? candles[prot.Idx].Index : (int?)null,
                 NextPrice = next != null ? next.Price : (double?)null,
                 IdmPrice = idm != null ? idm.Price : (double?)null
             } : null;
