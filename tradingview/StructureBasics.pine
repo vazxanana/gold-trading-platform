@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.9 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.10 ─────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -24,6 +24,10 @@
 //     A sweep that later gets closed through upgrades to BOS on that close —
 //     the label at the break bar tells you which one you're looking at, and
 //     S/D flips only fire on a true BOS.
+//   • Noise control: by default order blocks are drawn ONLY for confirmed
+//     BOS. A plain sweep stores its OB candidate silently; if the sweep
+//     later upgrades to BOS, the box appears retroactively anchored at the
+//     original crossing candle.
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
@@ -33,6 +37,7 @@ flipA = input.bool(false, "S/D flip boxes for A")
 flipB = input.bool(true, "S/D flip boxes for B")
 obA   = input.bool(true, "Order blocks for A")
 obB   = input.bool(true, "Order blocks for B")
+obBosOnly = input.bool(true, "Order blocks on BOS only (skip sweeps)")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(12, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
@@ -72,6 +77,9 @@ var aLine = array.new<line>()
 var aLbl = array.new<label>()
 var aMark = array.new<label>()     // "BOS" / "Sweep" label at the break bar
 var aBox = array.new<box>()
+var aPendT = array.new<float>()    // OB candidate stashed at a sweep, drawn
+var aPendTop = array.new<float>()  // only if the sweep upgrades to BOS
+var aPendBot = array.new<float>()
 var float aLastPlT = na
 var float aLastPhT = na
 var aObBox = array.new<box>()
@@ -91,6 +99,9 @@ var bLine = array.new<line>()
 var bLbl = array.new<label>()
 var bMark = array.new<label>()
 var bBox = array.new<box>()
+var bPendT = array.new<float>()
+var bPendTop = array.new<float>()
+var bPendBot = array.new<float>()
 var float bLastPlT = na
 var float bLastPhT = na
 var bObBox = array.new<box>()
@@ -129,6 +140,9 @@ if barstate.isconfirmed
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aMark, label(na))
         array.push(aBox, box(na))
+        array.push(aPendT, na)
+        array.push(aPendTop, na)
+        array.push(aPendBot, na)
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
@@ -139,6 +153,9 @@ if barstate.isconfirmed
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aMark, label(na))
         array.push(aBox, box(na))
+        array.push(aPendT, na)
+        array.push(aPendTop, na)
+        array.push(aPendBot, na)
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
         label.delete(array.get(aLbl, 0))
@@ -154,6 +171,9 @@ if barstate.isconfirmed
         array.remove(aLbl, 0)
         array.remove(aMark, 0)
         array.remove(aBox, 0)
+        array.remove(aPendT, 0)
+        array.remove(aPendTop, 0)
+        array.remove(aPendBot, 0)
 
     if array.size(aP) > 0
         for i = 0 to array.size(aP) - 1
@@ -166,12 +186,13 @@ if barstate.isconfirmed
                 wickThrough = isLow ? low < p : high > p
                 if closeThrough or wickThrough
                     // level crossed on THIS bar → the OB is the last opposite
-                    // candle strictly before this bar
+                    // candle strictly before this bar; on a plain sweep the
+                    // candidate is only stashed unless obBosOnly is off
                     obBull = not isLow
                     obT = obBull ? lastRedT : lastGrnT
-                    if obA and not na(obT) and not array.includes(aObT, obT)
-                        obTop = obBull ? lastRedTop : lastGrnHi
-                        obBot = obBull ? lastRedLo : lastGrnBot
+                    obTop = obBull ? lastRedTop : lastGrnHi
+                    obBot = obBull ? lastRedLo : lastGrnBot
+                    if obA and not na(obT) and (closeThrough or not obBosOnly) and not array.includes(aObT, obT)
                         obCol = obBull ? COL_UP : COL_DN
                         array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 80), border_color = color.new(obCol, 50), text = obName + " OB", text_color = obBull ? colObBullTxt : colObBearTxt, text_size = size.small))
                         array.push(aObBull, obBull)
@@ -180,6 +201,10 @@ if barstate.isconfirmed
                         array.push(aObT, obT)
                         array.push(aObMade, time)
                         array.push(aObState, 0)
+                    if not closeThrough
+                        array.set(aPendT, i, obT)
+                        array.set(aPendTop, i, obTop)
+                        array.set(aPendBot, i, obBot)
                     line.set_x2(ln, time)
                     if closeThrough
                         // layer candle CLOSED through → BOS
@@ -208,6 +233,19 @@ if barstate.isconfirmed
                 if ct3
                     label.set_text(array.get(aMark, i), aName + " BOS")
                     label.set_textcolor(array.get(aMark, i), colBosTxt)
+                    pT3 = array.get(aPendT, i)
+                    if obA and obBosOnly and not na(pT3) and not array.includes(aObT, pT3)
+                        obBull3 = not isLow
+                        pTop3 = array.get(aPendTop, i)
+                        pBot3 = array.get(aPendBot, i)
+                        obCol3 = obBull3 ? COL_UP : COL_DN
+                        array.push(aObBox, box.new(math.round(pT3), pTop3, time, pBot3, xloc = xloc.bar_time, bgcolor = color.new(obCol3, 80), border_color = color.new(obCol3, 50), text = obName + " OB", text_color = obBull3 ? colObBullTxt : colObBearTxt, text_size = size.small))
+                        array.push(aObBull, obBull3)
+                        array.push(aObTop, pTop3)
+                        array.push(aObBot, pBot3)
+                        array.push(aObT, pT3)
+                        array.push(aObMade, time)
+                        array.push(aObState, 0)
                     if flipA
                         ln3 = array.get(aLine, i)
                         array.set(aBox, i, box.new(line.get_x1(ln3), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -252,6 +290,9 @@ if barstate.isconfirmed
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bMark, label(na))
         array.push(bBox, box(na))
+        array.push(bPendT, na)
+        array.push(bPendTop, na)
+        array.push(bPendBot, na)
     if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
@@ -262,6 +303,9 @@ if barstate.isconfirmed
         array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bMark, label(na))
         array.push(bBox, box(na))
+        array.push(bPendT, na)
+        array.push(bPendTop, na)
+        array.push(bPendBot, na)
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
         label.delete(array.get(bLbl, 0))
@@ -277,6 +321,9 @@ if barstate.isconfirmed
         array.remove(bLbl, 0)
         array.remove(bMark, 0)
         array.remove(bBox, 0)
+        array.remove(bPendT, 0)
+        array.remove(bPendTop, 0)
+        array.remove(bPendBot, 0)
 
     if array.size(bP) > 0
         for i = 0 to array.size(bP) - 1
@@ -290,9 +337,9 @@ if barstate.isconfirmed
                 if closeThrough or wickThrough
                     obBull = not isLow
                     obT = obBull ? lastRedT : lastGrnT
-                    if obB and not na(obT) and not array.includes(bObT, obT)
-                        obTop = obBull ? lastRedTop : lastGrnHi
-                        obBot = obBull ? lastRedLo : lastGrnBot
+                    obTop = obBull ? lastRedTop : lastGrnHi
+                    obBot = obBull ? lastRedLo : lastGrnBot
+                    if obB and not na(obT) and (closeThrough or not obBosOnly) and not array.includes(bObT, obT)
                         obCol = obBull ? COL_UP : COL_DN
                         array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 80), border_color = color.new(obCol, 50), text = obName + " OB", text_color = obBull ? colObBullTxt : colObBearTxt, text_size = size.small))
                         array.push(bObBull, obBull)
@@ -301,6 +348,10 @@ if barstate.isconfirmed
                         array.push(bObT, obT)
                         array.push(bObMade, time)
                         array.push(bObState, 0)
+                    if not closeThrough
+                        array.set(bPendT, i, obT)
+                        array.set(bPendTop, i, obTop)
+                        array.set(bPendBot, i, obBot)
                     line.set_x2(ln, time)
                     if closeThrough
                         array.set(bMark, i, label.new(time, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
@@ -325,6 +376,19 @@ if barstate.isconfirmed
                 if ct3
                     label.set_text(array.get(bMark, i), bName + " BOS")
                     label.set_textcolor(array.get(bMark, i), colBosTxt)
+                    pT3 = array.get(bPendT, i)
+                    if obB and obBosOnly and not na(pT3) and not array.includes(bObT, pT3)
+                        obBull3 = not isLow
+                        pTop3 = array.get(bPendTop, i)
+                        pBot3 = array.get(bPendBot, i)
+                        obCol3 = obBull3 ? COL_UP : COL_DN
+                        array.push(bObBox, box.new(math.round(pT3), pTop3, time, pBot3, xloc = xloc.bar_time, bgcolor = color.new(obCol3, 80), border_color = color.new(obCol3, 50), text = obName + " OB", text_color = obBull3 ? colObBullTxt : colObBearTxt, text_size = size.small))
+                        array.push(bObBull, obBull3)
+                        array.push(bObTop, pTop3)
+                        array.push(bObBot, pBot3)
+                        array.push(bObT, pT3)
+                        array.push(bObMade, time)
+                        array.push(bObState, 0)
                     if flipB
                         ln3 = array.get(bLine, i)
                         array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
