@@ -38,6 +38,8 @@ showTrade  = input.bool(true, "Draw signal zone box + label")
 showDiag   = input.bool(true, "Show diagnostics (armed tint + break marks)")
 showChartOB = input.bool(true, "Mark chart-TF order blocks (break origins)")
 useFib     = input.bool(true, "Golden pocket filter (arm only zones near fib ~0.68)")
+closeFlip  = input.bool(true, "Close signal-position on H4 flip (structural exit)")
+trigWithin = input.int(192, "Trigger within bars of touch", minval = 1)
 fibMin     = input.float(0.60, "Fib retracement min", step = 0.01)
 fibMax     = input.float(0.79, "Fib retracement max", step = 0.01)
 
@@ -656,6 +658,8 @@ if barstate.isconfirmed
 
     // 1. zone-TF trend change clears armed/consumed state
     if zTrendS != lastZTrend
+        if closeFlip and posActive and posLong != (zTrendS == 1)
+            posActive := false
         array.clear(armHi)
         array.clear(armLo)
         array.clear(armBull)
@@ -755,6 +759,8 @@ if barstate.isconfirmed
                         bestAt := array.get(armAt, k)
             if best < 0
                 cntTrigNoZone += 1
+            if best >= 0 and bar_index - bestAt > trigWithin
+                best := -1
             if best >= 0 and dirOk and alignOk and not (onePos and posActive)
                 entry = close
                 azh = array.get(armHi, best)
