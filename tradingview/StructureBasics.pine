@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.10 ─────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.11 ─────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -28,6 +28,14 @@
 //     BOS. A plain sweep stores its OB candidate silently; if the sweep
 //     later upgrades to BOS, the box appears retroactively anchored at the
 //     original crossing candle.
+//   • Order blocks are H1 candles: the last opposite CONFIRMED H1 candle
+//     before the crossing bar, whatever timeframe the chart is on.
+//   • Entry engine: when price first touches into a live H1 OB the box arms.
+//     From there an M5 change of character (an M5 close breaking the latest
+//     M5 swing high for longs / swing low for shorts) fires a BUY/SELL label
+//     with a dotted target line at the nearest H4 swing high (buys) or H4
+//     swing low (sells), plus alertconditions. One signal per OB visit;
+//     a chart close through the far side of the box disarms it.
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
@@ -38,6 +46,7 @@ flipB = input.bool(true, "S/D flip boxes for B")
 obA   = input.bool(true, "Order blocks for A")
 obB   = input.bool(true, "Order blocks for B")
 obBosOnly = input.bool(true, "Order blocks on BOS only (skip sweeps)")
+showSig = input.bool(true, "BUY/SELL signals (OB touch + M5 ChoCh)")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(12, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
@@ -65,8 +74,20 @@ f_htf() =>
     bodyLo = ta.lowest(math.min(open, close), swS * 2 + 1)
     [hpl[1], hph[1], pT[1], bodyHi[1], bodyLo[1], close[1]]
 
+// last CONFIRMED candle of a layer (for the H1 order-block stream)
+f_ohlc() =>
+    [open[1], high[1], low[1], close[1], time[1]]
+
 [aPl, aPh, aPT, aBodyHi, aBodyLo, aClose] = request.security(syminfo.tickerid, tfA, f_htf(), lookahead = barmerge.lookahead_on)
 [bPl, bPh, bPT, bBodyHi, bBodyLo, bClose] = request.security(syminfo.tickerid, tfB, f_htf(), lookahead = barmerge.lookahead_on)
+
+// H1 candle stream (falls back to the chart timeframe if the chart is above H1)
+h1tf = timeframe.in_seconds(timeframe.period) <= 3600 ? "60" : timeframe.period
+[h1O, h1H, h1L, h1C, h1T] = request.security(syminfo.tickerid, h1tf, f_ohlc(), lookahead = barmerge.lookahead_on)
+
+// M5 intrabar stream for ChoCh detection (chart TF itself when at/below M5)
+m5tf = timeframe.in_seconds(timeframe.period) >= 300 ? "5" : timeframe.period
+[m5Ha, m5La, m5Ca] = request.security_lower_tf(syminfo.tickerid, m5tf, [high, low, close])
 
 // ── layer A state ───────────────────────────────────────────────────────────
 var aP = array.new<float>()
@@ -89,6 +110,7 @@ var aObBot = array.new<float>()
 var aObT = array.new<float>()
 var aObMade = array.new<float>()   // time of the crossing bar that created it
 var aObState = array.new<int>()    // 0 live, 1 mitigated (frozen)
+var aObArmed = array.new<bool>()   // touched → hunting for an M5 ChoCh
 
 // ── layer B state ───────────────────────────────────────────────────────────
 var bP = array.new<float>()
@@ -111,23 +133,105 @@ var bObBot = array.new<float>()
 var bObT = array.new<float>()
 var bObMade = array.new<float>()
 var bObState = array.new<int>()
+var bObArmed = array.new<bool>()
 
 aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
 bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
-obName = f_tfName(timeframe.period)
+obName = f_tfName(h1tf)
 
-// the most recent bearish / bullish chart candle strictly BEFORE the current
-// bar — the "last OB before the BOS" when a level gets crossed on this bar
-var float lastRedTop = na          // body top of the last red candle
+// the most recent bearish / bullish CONFIRMED H1 candle strictly BEFORE the
+// current bar — the "last H1 OB before the BOS" when a level gets crossed
+var float lastRedTop = na          // body top of the last red H1 candle
 var float lastRedLo = na           // its wick low
 var float lastRedT = na
-var float lastGrnBot = na          // body bottom of the last green candle
+var float lastGrnBot = na          // body bottom of the last green H1 candle
 var float lastGrnHi = na           // its wick high
 var float lastGrnT = na
+var float lastH1T = na
+
+// rolling M5 structure (swing strength 2) for ChoCh detection
+var m5Hbuf = array.new<float>()
+var m5Lbuf = array.new<float>()
+var float m5SwingHi = na
+var float m5SwingLo = na
+
+// fired signals: dotted target line until the H4 high/low is reached
+var sigLine = array.new<line>()
+var sigTgt = array.new<float>()
+var sigBull = array.new<bool>()
+var sigState = array.new<int>()    // 0 running, 1 target hit / done
+
+// nearest H4 (layer A) swing high above price for buys, swing low below for sells
+f_h4Target(bull) =>
+    float tgt = na
+    if array.size(aP) > 0
+        for q = array.size(aP) - 1 to 0
+            pp = array.get(aP, q)
+            if bull and not array.get(aIsLow, q) and pp > close
+                tgt := pp
+                break
+            if not bull and array.get(aIsLow, q) and pp < close
+                tgt := pp
+                break
+    tgt
+
+f_fireSig(bull) =>
+    tgt = f_h4Target(bull)
+    txt = (bull ? "BUY" : "SELL") + (na(tgt) ? "" : "  tgt " + str.tostring(tgt, format.mintick))
+    label.new(time, bull ? low : high, txt, xloc = xloc.bar_time, style = bull ? label.style_label_up : label.style_label_down, color = color.new(bull ? COL_UP : COL_DN, 15), textcolor = color.black, size = size.normal)
+    if not na(tgt)
+        array.push(sigLine, line.new(time, tgt, time, tgt, xloc = xloc.bar_time, color = color.new(bull ? COL_UP : COL_DN, 20), style = line.style_dotted, width = 2))
+        array.push(sigTgt, tgt)
+        array.push(sigBull, bull)
+        array.push(sigState, 0)
+
+buySig = false
+sellSig = false
 
 if barstate.isconfirmed
     aName = f_tfName(tfA)
     bName = f_tfName(tfB)
+
+    // refresh the H1 opposite-candle memory from the last confirmed H1 candle
+    if not na(h1T) and (na(lastH1T) or h1T != lastH1T)
+        lastH1T := h1T
+        if h1C < h1O
+            lastRedTop := math.max(h1O, h1C)
+            lastRedLo := h1L
+            lastRedT := h1T
+        if h1C > h1O
+            lastGrnBot := math.min(h1O, h1C)
+            lastGrnHi := h1H
+            lastGrnT := h1T
+
+    // walk this bar's M5 candles: confirm swing points (strength 2), and an
+    // M5 close breaking the latest swing = change of character. Each swing is
+    // consumed by its break so one ChoCh fires once.
+    chUp = false
+    chDn = false
+    nM5 = array.size(m5Ca)
+    if nM5 > 0
+        for k = 0 to nM5 - 1
+            array.push(m5Hbuf, array.get(m5Ha, k))
+            array.push(m5Lbuf, array.get(m5La, k))
+            sz = array.size(m5Hbuf)
+            if sz >= 5
+                pv = array.get(m5Hbuf, sz - 3)
+                if pv >= array.get(m5Hbuf, sz - 5) and pv >= array.get(m5Hbuf, sz - 4) and pv > array.get(m5Hbuf, sz - 2) and pv > array.get(m5Hbuf, sz - 1)
+                    m5SwingHi := pv
+                pl = array.get(m5Lbuf, sz - 3)
+                if pl <= array.get(m5Lbuf, sz - 5) and pl <= array.get(m5Lbuf, sz - 4) and pl < array.get(m5Lbuf, sz - 2) and pl < array.get(m5Lbuf, sz - 1)
+                    m5SwingLo := pl
+            cc = array.get(m5Ca, k)
+            if not na(m5SwingHi) and cc > m5SwingHi
+                chUp := true
+                m5SwingHi := na
+            if not na(m5SwingLo) and cc < m5SwingLo
+                chDn := true
+                m5SwingLo := na
+        while array.size(m5Hbuf) > 400
+            array.remove(m5Hbuf, 0)
+            array.remove(m5Lbuf, 0)
 
     // ════════════════════════════ LAYER A ══════════════════════════════════
     if aOn and not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
@@ -201,6 +305,7 @@ if barstate.isconfirmed
                         array.push(aObT, obT)
                         array.push(aObMade, time)
                         array.push(aObState, 0)
+                        array.push(aObArmed, false)
                     if not closeThrough
                         array.set(aPendT, i, obT)
                         array.set(aPendTop, i, obTop)
@@ -246,6 +351,7 @@ if barstate.isconfirmed
                         array.push(aObT, pT3)
                         array.push(aObMade, time)
                         array.push(aObState, 0)
+                        array.push(aObArmed, false)
                     if flipA
                         ln3 = array.get(aLine, i)
                         array.set(aBox, i, box.new(line.get_x1(ln3), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -263,12 +369,26 @@ if barstate.isconfirmed
                 mit = time > array.get(aObMade, i) and (array.get(aObBull, i) ? low <= array.get(aObTop, i) : high >= array.get(aObBot, i))
                 if mit
                     array.set(aObState, i, 1)
+                    array.set(aObArmed, i, showSig)
                     if unmitOnly
                         box.delete(array.get(aObBox, i))
                     else
                         cM = array.get(aObBull, i) ? COL_UP : COL_DN
                         box.set_bgcolor(array.get(aObBox, i), color.new(cM, 92))
                         box.set_border_color(array.get(aObBox, i), color.new(cM, 75))
+            if array.get(aObState, i) == 1 and array.get(aObArmed, i)
+                sBull = array.get(aObBull, i)
+                inval = sBull ? close < array.get(aObBot, i) : close > array.get(aObTop, i)
+                if inval
+                    array.set(aObArmed, i, false)
+                else if sBull and chUp
+                    f_fireSig(true)
+                    buySig := true
+                    array.set(aObArmed, i, false)
+                else if not sBull and chDn
+                    f_fireSig(false)
+                    sellSig := true
+                    array.set(aObArmed, i, false)
     while array.size(aObBox) > maxObs
         box.delete(array.get(aObBox, 0))
         array.remove(aObBox, 0)
@@ -278,6 +398,7 @@ if barstate.isconfirmed
         array.remove(aObT, 0)
         array.remove(aObMade, 0)
         array.remove(aObState, 0)
+        array.remove(aObArmed, 0)
 
     // ════════════════════════════ LAYER B ══════════════════════════════════
     if bOn and not na(bPl) and (na(bLastPlT) or bPT != bLastPlT)
@@ -348,6 +469,7 @@ if barstate.isconfirmed
                         array.push(bObT, obT)
                         array.push(bObMade, time)
                         array.push(bObState, 0)
+                        array.push(bObArmed, false)
                     if not closeThrough
                         array.set(bPendT, i, obT)
                         array.set(bPendTop, i, obTop)
@@ -389,6 +511,7 @@ if barstate.isconfirmed
                         array.push(bObT, pT3)
                         array.push(bObMade, time)
                         array.push(bObState, 0)
+                        array.push(bObArmed, false)
                     if flipB
                         ln3 = array.get(bLine, i)
                         array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -404,12 +527,26 @@ if barstate.isconfirmed
                 mit = time > array.get(bObMade, i) and (array.get(bObBull, i) ? low <= array.get(bObTop, i) : high >= array.get(bObBot, i))
                 if mit
                     array.set(bObState, i, 1)
+                    array.set(bObArmed, i, showSig)
                     if unmitOnly
                         box.delete(array.get(bObBox, i))
                     else
                         cM = array.get(bObBull, i) ? COL_UP : COL_DN
                         box.set_bgcolor(array.get(bObBox, i), color.new(cM, 92))
                         box.set_border_color(array.get(bObBox, i), color.new(cM, 75))
+            if array.get(bObState, i) == 1 and array.get(bObArmed, i)
+                sBull = array.get(bObBull, i)
+                inval = sBull ? close < array.get(bObBot, i) : close > array.get(bObTop, i)
+                if inval
+                    array.set(bObArmed, i, false)
+                else if sBull and chUp
+                    f_fireSig(true)
+                    buySig := true
+                    array.set(bObArmed, i, false)
+                else if not sBull and chDn
+                    f_fireSig(false)
+                    sellSig := true
+                    array.set(bObArmed, i, false)
     while array.size(bObBox) > maxObs
         box.delete(array.get(bObBox, 0))
         array.remove(bObBox, 0)
@@ -419,14 +556,23 @@ if barstate.isconfirmed
         array.remove(bObT, 0)
         array.remove(bObMade, 0)
         array.remove(bObState, 0)
+        array.remove(bObArmed, 0)
 
-    // refresh the opposite-candle memory LAST, so every lookup above sees
-    // the last opposite candle strictly BEFORE the current (crossing) bar
-    if close < open
-        lastRedTop := math.max(open, close)
-        lastRedLo := low
-        lastRedT := time
-    if close > open
-        lastGrnBot := math.min(open, close)
-        lastGrnHi := high
-        lastGrnT := time
+    // fired-signal lifecycle: dotted target line runs until the H4 high/low
+    // is reached
+    if array.size(sigLine) > 0
+        for i = 0 to array.size(sigLine) - 1
+            if array.get(sigState, i) == 0
+                line.set_x2(array.get(sigLine, i), time)
+                hit = array.get(sigBull, i) ? high >= array.get(sigTgt, i) : low <= array.get(sigTgt, i)
+                if hit
+                    array.set(sigState, i, 1)
+    while array.size(sigLine) > 12
+        line.delete(array.get(sigLine, 0))
+        array.remove(sigLine, 0)
+        array.remove(sigTgt, 0)
+        array.remove(sigBull, 0)
+        array.remove(sigState, 0)
+
+alertcondition(buySig, "StructBasics BUY", "H1 OB touched + M5 ChoCh up — buy toward the H4 high")
+alertcondition(sellSig, "StructBasics SELL", "H1 OB touched + M5 ChoCh down — sell toward the H4 low")
