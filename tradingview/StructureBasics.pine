@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.13 ─────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.14 ─────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -30,7 +30,10 @@
 //     original crossing candle.
 //   • Order blocks are H1 candles: the last opposite CONFIRMED H1 candle
 //     before the crossing bar, whatever timeframe the chart is on.
-//   • Entry engine: when price first touches into a live H1 OB the box arms.
+//   • Entry engine: a touch only counts as the RETEST — price must first
+//     trade fully clear of the box on the breakout side (a whole bar beyond
+//     it), and only the RETURN into the box arms it. The leftovers of the
+//     breakout impulse brushing the box never arm it. When the box arms:
 //     From there an M5 change of character (an M5 close breaking the latest
 //     M5 swing high for longs / swing low for shorts) fires a BUY/SELL label
 //     with a dotted target line at the nearest H4 swing high (buys) or H4
@@ -116,7 +119,8 @@ var aObBot = array.new<float>()
 var aObT = array.new<float>()
 var aObMade = array.new<float>()   // time of the crossing bar that created it
 var aObState = array.new<int>()    // 0 live, 1 mitigated (frozen)
-var aObArmed = array.new<bool>()   // touched → hunting for an M5 ChoCh
+var aObArmed = array.new<bool>()   // retested → hunting for an M5 ChoCh
+var aObLeft = array.new<bool>()    // price has traded fully clear of the box
 
 // ── layer B state ───────────────────────────────────────────────────────────
 var bP = array.new<float>()
@@ -140,6 +144,7 @@ var bObT = array.new<float>()
 var bObMade = array.new<float>()
 var bObState = array.new<int>()
 var bObArmed = array.new<bool>()
+var bObLeft = array.new<bool>()
 
 aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
 bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
@@ -313,6 +318,7 @@ if barstate.isconfirmed
                         array.push(aObMade, time)
                         array.push(aObState, 0)
                         array.push(aObArmed, false)
+                        array.push(aObLeft, false)
                     if not closeThrough
                         array.set(aPendT, i, obT)
                         array.set(aPendTop, i, obTop)
@@ -361,6 +367,7 @@ if barstate.isconfirmed
                         array.push(aObMade, time)
                         array.push(aObState, 0)
                         array.push(aObArmed, false)
+                        array.push(aObLeft, false)
                     if flipA
                         ln3 = array.get(aLine, i)
                         array.set(aBox, i, box.new(line.get_x1(ln3), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -375,16 +382,32 @@ if barstate.isconfirmed
         for i = 0 to array.size(aObBox) - 1
             if array.get(aObState, i) == 0
                 box.set_right(array.get(aObBox, i), time)
-                mit = time > array.get(aObMade, i) and (array.get(aObBull, i) ? low <= array.get(aObTop, i) : high >= array.get(aObBot, i))
-                if mit
+                oBull = array.get(aObBull, i)
+                oTop = array.get(aObTop, i)
+                oBot = array.get(aObBot, i)
+                viol = oBull ? close < oBot : close > oTop
+                if viol
+                    // closed through the far side before any retest — zone dead
                     array.set(aObState, i, 1)
-                    array.set(aObArmed, i, showSig)
                     if unmitOnly
                         box.delete(array.get(aObBox, i))
                     else
-                        cM = array.get(aObBull, i) ? COL_UP : COL_DN
+                        cM = oBull ? COL_UP : COL_DN
                         box.set_bgcolor(array.get(aObBox, i), color.new(cM, 92))
                         box.set_border_color(array.get(aObBox, i), color.new(cM, 75))
+                else
+                    if not array.get(aObLeft, i) and (oBull ? low > oTop : high < oBot)
+                        array.set(aObLeft, i, true)
+                    mit = array.get(aObLeft, i) and (oBull ? low <= oTop : high >= oBot)
+                    if mit
+                        array.set(aObState, i, 1)
+                        array.set(aObArmed, i, showSig)
+                        if unmitOnly
+                            box.delete(array.get(aObBox, i))
+                        else
+                            cM = oBull ? COL_UP : COL_DN
+                            box.set_bgcolor(array.get(aObBox, i), color.new(cM, 92))
+                            box.set_border_color(array.get(aObBox, i), color.new(cM, 75))
             if array.get(aObState, i) == 1 and array.get(aObArmed, i)
                 sBull = array.get(aObBull, i)
                 inval = sBull ? close < array.get(aObBot, i) : close > array.get(aObTop, i)
@@ -408,6 +431,7 @@ if barstate.isconfirmed
         array.remove(aObMade, 0)
         array.remove(aObState, 0)
         array.remove(aObArmed, 0)
+        array.remove(aObLeft, 0)
 
     // ════════════════════════════ LAYER B ══════════════════════════════════
     if bOn and not na(bPl) and (na(bLastPlT) or bPT != bLastPlT)
@@ -479,6 +503,7 @@ if barstate.isconfirmed
                         array.push(bObMade, time)
                         array.push(bObState, 0)
                         array.push(bObArmed, false)
+                        array.push(bObLeft, false)
                     if not closeThrough
                         array.set(bPendT, i, obT)
                         array.set(bPendTop, i, obTop)
@@ -521,6 +546,7 @@ if barstate.isconfirmed
                         array.push(bObMade, time)
                         array.push(bObState, 0)
                         array.push(bObArmed, false)
+                        array.push(bObLeft, false)
                     if flipB
                         ln3 = array.get(bLine, i)
                         array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -533,16 +559,31 @@ if barstate.isconfirmed
         for i = 0 to array.size(bObBox) - 1
             if array.get(bObState, i) == 0
                 box.set_right(array.get(bObBox, i), time)
-                mit = time > array.get(bObMade, i) and (array.get(bObBull, i) ? low <= array.get(bObTop, i) : high >= array.get(bObBot, i))
-                if mit
+                oBull = array.get(bObBull, i)
+                oTop = array.get(bObTop, i)
+                oBot = array.get(bObBot, i)
+                viol = oBull ? close < oBot : close > oTop
+                if viol
                     array.set(bObState, i, 1)
-                    array.set(bObArmed, i, showSig)
                     if unmitOnly
                         box.delete(array.get(bObBox, i))
                     else
-                        cM = array.get(bObBull, i) ? COL_UP : COL_DN
+                        cM = oBull ? COL_UP : COL_DN
                         box.set_bgcolor(array.get(bObBox, i), color.new(cM, 92))
                         box.set_border_color(array.get(bObBox, i), color.new(cM, 75))
+                else
+                    if not array.get(bObLeft, i) and (oBull ? low > oTop : high < oBot)
+                        array.set(bObLeft, i, true)
+                    mit = array.get(bObLeft, i) and (oBull ? low <= oTop : high >= oBot)
+                    if mit
+                        array.set(bObState, i, 1)
+                        array.set(bObArmed, i, showSig)
+                        if unmitOnly
+                            box.delete(array.get(bObBox, i))
+                        else
+                            cM = oBull ? COL_UP : COL_DN
+                            box.set_bgcolor(array.get(bObBox, i), color.new(cM, 92))
+                            box.set_border_color(array.get(bObBox, i), color.new(cM, 75))
             if array.get(bObState, i) == 1 and array.get(bObArmed, i)
                 sBull = array.get(bObBull, i)
                 inval = sBull ? close < array.get(bObBot, i) : close > array.get(bObTop, i)
@@ -566,6 +607,7 @@ if barstate.isconfirmed
         array.remove(bObMade, 0)
         array.remove(bObState, 0)
         array.remove(bObArmed, 0)
+        array.remove(bObLeft, 0)
 
     // fired-signal lifecycle: dotted target line runs until the H4 high/low
     // is reached
