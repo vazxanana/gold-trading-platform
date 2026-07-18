@@ -98,6 +98,13 @@ aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
 bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
 obName = f_tfName(timeframe.period)
 
+// most recent bearish / bullish candle BEFORE the current bar — the OB
+// candle when the leg origin lands on an opposite-colored reversal bar
+var float lastRedTop = na
+var float lastRedT = na
+var float lastGrnBot = na
+var float lastGrnT = na
+
 if barstate.isconfirmed
     aName = f_tfName(tfA)
     bName = f_tfName(tfB)
@@ -112,7 +119,7 @@ if barstate.isconfirmed
         array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
-        array.push(aOrgT, time)
+        array.push(aOrgT, close > open ? time : nz(lastGrnT, time))
         array.push(aOrgExt, high)              // low-level: track highest high
         array.push(aOrgBody, math.min(open, close))
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
@@ -124,7 +131,7 @@ if barstate.isconfirmed
         array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
-        array.push(aOrgT, time)
+        array.push(aOrgT, close < open ? time : nz(lastRedT, time))
         array.push(aOrgExt, low)               // high-level: track lowest low
         array.push(aOrgBody, math.max(open, close))
     while array.size(aP) > 2 * maxKeep
@@ -154,13 +161,13 @@ if barstate.isconfirmed
                 if isLow
                     if high > array.get(aOrgExt, i)
                         array.set(aOrgExt, i, high)
-                        array.set(aOrgBody, i, math.min(open, close))
-                        array.set(aOrgT, i, time)
+                        array.set(aOrgBody, i, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
+                        array.set(aOrgT, i, close > open ? time : nz(lastGrnT, time))
                 else
                     if low < array.get(aOrgExt, i)
                         array.set(aOrgExt, i, low)
-                        array.set(aOrgBody, i, math.max(open, close))
-                        array.set(aOrgT, i, time)
+                        array.set(aOrgBody, i, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
+                        array.set(aOrgT, i, close < open ? time : nz(lastRedT, time))
                 ln = array.get(aLine, i)
                 closeThrough = isLow ? nz(aClose, p + 1) < p : nz(aClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
@@ -221,9 +228,9 @@ if barstate.isconfirmed
         array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
-        array.push(bOrgT, time)
+        array.push(bOrgT, close > open ? time : nz(lastGrnT, time))
         array.push(bOrgExt, high)
-        array.push(bOrgBody, math.min(open, close))
+        array.push(bOrgBody, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
     if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
@@ -233,9 +240,9 @@ if barstate.isconfirmed
         array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
         array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
-        array.push(bOrgT, time)
+        array.push(bOrgT, close < open ? time : nz(lastRedT, time))
         array.push(bOrgExt, low)
-        array.push(bOrgBody, math.max(open, close))
+        array.push(bOrgBody, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
         label.delete(array.get(bLbl, 0))
@@ -261,13 +268,13 @@ if barstate.isconfirmed
                 if isLow
                     if high > array.get(bOrgExt, i)
                         array.set(bOrgExt, i, high)
-                        array.set(bOrgBody, i, math.min(open, close))
-                        array.set(bOrgT, i, time)
+                        array.set(bOrgBody, i, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
+                        array.set(bOrgT, i, close > open ? time : nz(lastGrnT, time))
                 else
                     if low < array.get(bOrgExt, i)
                         array.set(bOrgExt, i, low)
-                        array.set(bOrgBody, i, math.max(open, close))
-                        array.set(bOrgT, i, time)
+                        array.set(bOrgBody, i, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
+                        array.set(bOrgT, i, close < open ? time : nz(lastRedT, time))
                 ln = array.get(bLine, i)
                 closeThrough = isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
@@ -316,3 +323,12 @@ if barstate.isconfirmed
         array.remove(bObBot, 0)
         array.remove(bObT, 0)
         array.remove(bObState, 0)
+
+    // refresh the opposite-candle memory LAST so all lookups above see the
+    // most recent opposite candle strictly before the current bar
+    if close < open
+        lastRedTop := math.max(open, close)
+        lastRedT := time
+    if close > open
+        lastGrnBot := math.min(open, close)
+        lastGrnT := time
