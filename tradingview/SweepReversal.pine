@@ -1,0 +1,308 @@
+//@version=6
+// ─── SWEEP REVERSAL v1.0 ────────────────────────────────────────────────────
+// A different approach from the OB-retest stack: trade the LIQUIDITY SWEEP
+// itself.
+//
+//   • Two structure layers (H4 and Daily by default). Every confirmed swing
+//     high/low is a level line, captioned with its timeframe.
+//   • A level taken by a WICK only (no layer close through) is a Sweep —
+//     liquidity grabbed, structure intact. That is the signal:
+//         swept HIGH → SELL, targeting the nearest LIVE swing LOW of the
+//                      SAME timeframe below price
+//         swept LOW  → BUY, targeting the nearest LIVE swing HIGH of the
+//                      SAME timeframe above price
+//   • SL beyond the sweep wick (the extreme of the sweeping bar + buffer).
+//   • If the swept level later gets CLOSED through (sweep upgrades to BOS),
+//     the reversal premise is dead — the position closes immediately.
+//   • One position at a time; a level fires at most once per sweep.
+//   • Optional H4 trend filter (off by default — sweep reversals are
+//     counter-move by nature).
+//
+// Strategy Tester ready: market entry on the sweep bar close, exit bracket
+// at the target level / sweep-wick SL, premise-dead early close.
+// ────────────────────────────────────────────────────────────────────────────
+strategy("Sweep Reversal", "SweepRev", overlay = true, max_lines_count = 500, max_labels_count = 500, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0, calc_on_every_tick = false)
+
+swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
+tfA   = input.timeframe("240", "Structure timeframe A")
+tfB   = input.timeframe("D", "Structure timeframe B")
+tradeA = input.bool(true, "Trade sweeps of A levels")
+tradeB = input.bool(true, "Trade sweeps of B levels")
+trendFilter = input.bool(false, "Signals only with the H4 trend")
+slBuf = input.float(0.5, "SL buffer beyond sweep wick (price units)", minval = 0)
+maxKeep = input.int(8, "Max levels kept per layer")
+
+colLvlTxt   = input.color(color.white, "Caption — levels (H4/Daily)", group = "Caption colors")
+colBosTxt   = input.color(#60A5FA, "Caption — BOS", group = "Caption colors")
+colSweepTxt = input.color(#FBBF24, "Caption — Liquidity Sweep", group = "Caption colors")
+
+color COL_UP = #4ADE80
+color COL_DN = #FB7185
+
+f_tfName(tf) =>
+    tf == "D" or tf == "1D" ? "Daily" : tf == "W" ? "Weekly" : tf == "240" ? "H4" : tf == "60" ? "H1" : tf == "15" ? "M15" : tf
+
+f_htf() =>
+    hpl = ta.pivotlow(low, swS, swS)
+    hph = ta.pivothigh(high, swS, swS)
+    pT = time[swS]
+    [hpl[1], hph[1], pT[1], close[1]]
+
+[aPl, aPh, aPT, aClose] = request.security(syminfo.tickerid, tfA, f_htf(), lookahead = barmerge.lookahead_on)
+[bPl, bPh, bPT, bClose] = request.security(syminfo.tickerid, tfB, f_htf(), lookahead = barmerge.lookahead_on)
+
+// ── layer A state ───────────────────────────────────────────────────────────
+var aP = array.new<float>()
+var aIsLow = array.new<bool>()
+var aState = array.new<int>()      // 0 live, 2 done, 3 swept
+var aLine = array.new<line>()
+var aLbl = array.new<label>()
+var aMark = array.new<label>()
+var float aLastPlT = na
+var float aLastPhT = na
+var int aTrend = 0                 // H4 structure trend: 1 up, -1 down
+
+// ── layer B state ───────────────────────────────────────────────────────────
+var bP = array.new<float>()
+var bIsLow = array.new<bool>()
+var bState = array.new<int>()
+var bLine = array.new<line>()
+var bLbl = array.new<label>()
+var bMark = array.new<label>()
+var float bLastPlT = na
+var float bLastPhT = na
+
+aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
+bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
+
+// fired signals: dotted TP (colored) and SL (gray) lines until hit
+var sigLine = array.new<line>()
+var sigTgt = array.new<float>()
+var sigBull = array.new<bool>()
+var sigState = array.new<int>()
+
+// the open trade's premise: the swept level price (na when flat)
+var float posLvl = na
+
+// nearest LIVE opposite level of the SAME layer: swept low → buy toward the
+// layer's high above price; swept high → sell toward the layer's low below
+f_tgt(Ps, Lows, Sts, bull) =>
+    float tgt = na
+    if array.size(Ps) > 0
+        for q = 0 to array.size(Ps) - 1
+            if array.get(Sts, q) == 0
+                pp = array.get(Ps, q)
+                if bull and not array.get(Lows, q) and pp > close and (na(tgt) or pp < tgt)
+                    tgt := pp
+                if not bull and array.get(Lows, q) and pp < close and (na(tgt) or pp > tgt)
+                    tgt := pp
+    tgt
+
+f_fireSig(bull, slP, tgt) =>
+    txt = (bull ? "BUY" : "SELL") + "  tgt " + str.tostring(tgt, format.mintick) + "  sl " + str.tostring(slP, format.mintick)
+    label.new(time, bull ? low : high, txt, xloc = xloc.bar_time, style = bull ? label.style_label_up : label.style_label_down, color = color.new(bull ? COL_UP : COL_DN, 15), textcolor = color.black, size = size.normal)
+    array.push(sigLine, line.new(time, tgt, time, tgt, xloc = xloc.bar_time, color = color.new(bull ? COL_UP : COL_DN, 20), style = line.style_dotted, width = 2))
+    array.push(sigTgt, tgt)
+    array.push(sigBull, bull)
+    array.push(sigState, 0)
+    array.push(sigLine, line.new(time, slP, time, slP, xloc = xloc.bar_time, color = color.new(color.gray, 30), style = line.style_dotted, width = 1))
+    array.push(sigTgt, slP)
+    array.push(sigBull, not bull)
+    array.push(sigState, 0)
+
+buySig = false
+sellSig = false
+float buySL = na
+float buyTP = na
+float sellSL = na
+float sellTP = na
+premiseDead = false
+
+if barstate.isconfirmed
+    aName = f_tfName(tfA)
+    bName = f_tfName(tfB)
+
+    // ════════════════════════════ LAYER A ══════════════════════════════════
+    if aOn and not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
+        aLastPlT := aPT
+        array.push(aP, aPl)
+        array.push(aIsLow, true)
+        array.push(aState, 0)
+        array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+        array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+        array.push(aMark, label(na))
+    if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
+        aLastPhT := aPT
+        array.push(aP, aPh)
+        array.push(aIsLow, false)
+        array.push(aState, 0)
+        array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+        array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+        array.push(aMark, label(na))
+    while array.size(aP) > 2 * maxKeep
+        line.delete(array.get(aLine, 0))
+        label.delete(array.get(aLbl, 0))
+        if not na(array.get(aMark, 0))
+            label.delete(array.get(aMark, 0))
+        array.remove(aP, 0)
+        array.remove(aIsLow, 0)
+        array.remove(aState, 0)
+        array.remove(aLine, 0)
+        array.remove(aLbl, 0)
+        array.remove(aMark, 0)
+
+    if array.size(aP) > 0
+        for i = 0 to array.size(aP) - 1
+            st = array.get(aState, i)
+            p = array.get(aP, i)
+            isLow = array.get(aIsLow, i)
+            closeThrough = not na(aClose) and (isLow ? aClose < p : aClose > p)
+            wickThrough = isLow ? low < p : high > p
+            if st == 0
+                ln = array.get(aLine, i)
+                if closeThrough or wickThrough
+                    line.set_x2(ln, time)
+                    if closeThrough
+                        aTrend := isLow ? -1 : 1
+                        array.set(aMark, i, label.new(time, p, aName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        array.set(aState, i, 2)
+                    else
+                        // liquidity sweep → reversal signal, target the
+                        // opposite side of the SAME timeframe
+                        array.set(aMark, i, label.new(time, p, aName + " Sweep", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colSweepTxt, size = size.small))
+                        array.set(aState, i, 3)
+                        sBull = isLow
+                        if tradeA and strategy.position_size == 0 and not buySig and not sellSig and (not trendFilter or aTrend == (sBull ? 1 : -1))
+                            slP = sBull ? low - slBuf : high + slBuf
+                            tgt = f_tgt(aP, aIsLow, aState, sBull)
+                            if not na(tgt)
+                                f_fireSig(sBull, slP, tgt)
+                                if sBull
+                                    buySig := true
+                                    buySL := slP
+                                    buyTP := tgt
+                                else
+                                    sellSig := true
+                                    sellSL := slP
+                                    sellTP := tgt
+                                posLvl := p
+                else
+                    line.set_x2(ln, time)
+                    label.set_x(array.get(aLbl, i), math.round(math.avg(line.get_x1(ln), time)))
+            else if st == 3 and closeThrough
+                // sweep upgrades to BOS: structure actually broke
+                aTrend := isLow ? -1 : 1
+                label.set_text(array.get(aMark, i), aName + " BOS")
+                label.set_textcolor(array.get(aMark, i), colBosTxt)
+                array.set(aState, i, 2)
+                if not na(posLvl) and posLvl == p and strategy.position_size != 0
+                    premiseDead := true
+
+    // ════════════════════════════ LAYER B ══════════════════════════════════
+    if bOn and not na(bPl) and (na(bLastPlT) or bPT != bLastPlT)
+        bLastPlT := bPT
+        array.push(bP, bPl)
+        array.push(bIsLow, true)
+        array.push(bState, 0)
+        array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
+        array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
+        array.push(bMark, label(na))
+    if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
+        bLastPhT := bPT
+        array.push(bP, bPh)
+        array.push(bIsLow, false)
+        array.push(bState, 0)
+        array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
+        array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
+        array.push(bMark, label(na))
+    while array.size(bP) > 2 * maxKeep
+        line.delete(array.get(bLine, 0))
+        label.delete(array.get(bLbl, 0))
+        if not na(array.get(bMark, 0))
+            label.delete(array.get(bMark, 0))
+        array.remove(bP, 0)
+        array.remove(bIsLow, 0)
+        array.remove(bState, 0)
+        array.remove(bLine, 0)
+        array.remove(bLbl, 0)
+        array.remove(bMark, 0)
+
+    if array.size(bP) > 0
+        for i = 0 to array.size(bP) - 1
+            st = array.get(bState, i)
+            p = array.get(bP, i)
+            isLow = array.get(bIsLow, i)
+            closeThrough = not na(bClose) and (isLow ? bClose < p : bClose > p)
+            wickThrough = isLow ? low < p : high > p
+            if st == 0
+                ln = array.get(bLine, i)
+                if closeThrough or wickThrough
+                    line.set_x2(ln, time)
+                    if closeThrough
+                        array.set(bMark, i, label.new(time, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        array.set(bState, i, 2)
+                    else
+                        array.set(bMark, i, label.new(time, p, bName + " Sweep", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colSweepTxt, size = size.small))
+                        array.set(bState, i, 3)
+                        sBull = isLow
+                        if tradeB and strategy.position_size == 0 and not buySig and not sellSig and (not trendFilter or aTrend == (sBull ? 1 : -1))
+                            slP = sBull ? low - slBuf : high + slBuf
+                            tgt = f_tgt(bP, bIsLow, bState, sBull)
+                            if not na(tgt)
+                                f_fireSig(sBull, slP, tgt)
+                                if sBull
+                                    buySig := true
+                                    buySL := slP
+                                    buyTP := tgt
+                                else
+                                    sellSig := true
+                                    sellSL := slP
+                                    sellTP := tgt
+                                posLvl := p
+                else
+                    line.set_x2(ln, time)
+                    label.set_x(array.get(bLbl, i), math.round(math.avg(line.get_x1(ln), time)))
+            else if st == 3 and closeThrough
+                label.set_text(array.get(bMark, i), bName + " BOS")
+                label.set_textcolor(array.get(bMark, i), colBosTxt)
+                array.set(bState, i, 2)
+                if not na(posLvl) and posLvl == p and strategy.position_size != 0
+                    premiseDead := true
+
+    // fired-signal lifecycle: dotted lines run until their price is hit
+    if array.size(sigLine) > 0
+        for i = 0 to array.size(sigLine) - 1
+            if array.get(sigState, i) == 0
+                line.set_x2(array.get(sigLine, i), time)
+                hit = array.get(sigBull, i) ? high >= array.get(sigTgt, i) : low <= array.get(sigTgt, i)
+                if hit
+                    array.set(sigState, i, 1)
+    while array.size(sigLine) > 24
+        line.delete(array.get(sigLine, 0))
+        array.remove(sigLine, 0)
+        array.remove(sigTgt, 0)
+        array.remove(sigBull, 0)
+        array.remove(sigState, 0)
+
+alertcondition(buySig, "SweepRev BUY", "Low swept — buy toward the same timeframe's high")
+alertcondition(sellSig, "SweepRev SELL", "High swept — sell toward the same timeframe's low")
+
+// ── order management ────────────────────────────────────────────────────────
+if buySig
+    strategy.entry("Long", strategy.long)
+    strategy.exit("LongX", "Long", stop = buySL, limit = buyTP)
+if sellSig
+    strategy.entry("Short", strategy.short)
+    strategy.exit("ShortX", "Short", stop = sellSL, limit = sellTP)
+
+// swept level closed through after entry — reversal premise dead
+if premiseDead
+    strategy.close_all(comment = "BOS through swept level")
+
+if strategy.position_size == 0 and not buySig and not sellSig
+    posLvl := na
+
+// live H4 trend badge
+var table trendTbl = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.cell(trendTbl, 0, 0, "H4 " + (aTrend == 1 ? "▲ UP" : aTrend == -1 ? "▼ DOWN" : "—"), text_color = aTrend == 1 ? COL_UP : aTrend == -1 ? COL_DN : color.gray, text_size = size.small, bgcolor = color.new(color.black, 40))
