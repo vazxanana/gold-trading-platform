@@ -26,6 +26,12 @@ obA   = input.bool(true, "Order blocks for A")
 obB   = input.bool(true, "Order blocks for B")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(6, "Max order blocks kept per layer")
+unmitOnly = input.bool(false, "Show unmitigated order blocks only")
+
+colLvlTxt    = input.color(color.white, "Caption — levels (H4/Daily)", group = "Caption colors")
+colObBearTxt = input.color(#FB7185, "Caption — bearish OB", group = "Caption colors")
+colObBullTxt = input.color(#4ADE80, "Caption — bullish OB", group = "Caption colors")
+colFlipTxt   = input.color(#C084FC, "Caption — S/D Flip", group = "Caption colors")
 
 color COL_UP = #4ADE80
 color COL_DN = #FB7185
@@ -118,7 +124,7 @@ if barstate.isconfirmed
         array.push(aIsLow, true)
         array.push(aState, 0)
         array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
-        array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.small))
+        array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
@@ -127,7 +133,7 @@ if barstate.isconfirmed
         array.push(aIsLow, false)
         array.push(aState, 0)
         array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
-        array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.small))
+        array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
@@ -158,14 +164,14 @@ if barstate.isconfirmed
                     obT = isLow ? aLgT : aLrT
                     if obA and not na(obTop) and not array.includes(aObT, obT)
                         obCol = isLow ? COL_DN : COL_UP
-                        array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = aName + " OB", text_color = color.new(obCol, 20), text_size = size.small))
+                        array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = aName + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
                         array.push(aObBull, not isLow)
                         array.push(aObTop, obTop)
                         array.push(aObBot, obBot)
                         array.push(aObT, obT)
                         array.push(aObState, 0)
                     if closeThrough and flipA
-                        array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = COL_FLIPTXT, text_size = size.normal))
+                        array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
                         array.set(aState, i, 1)
                     else
                         array.set(aState, i, 2)
@@ -185,6 +191,8 @@ if barstate.isconfirmed
                 box.set_right(array.get(aObBox, i), time)
                 dead = array.get(aObBull, i) ? nz(aClose, array.get(aObBot, i) + 1) < array.get(aObBot, i) : nz(aClose, array.get(aObTop, i) - 1) > array.get(aObTop, i)
                 if dead
+                    if unmitOnly
+                        box.delete(array.get(aObBox, i))
                     array.set(aObState, i, 1)
     while array.size(aObBox) > maxObs
         box.delete(array.get(aObBox, 0))
@@ -203,7 +211,7 @@ if barstate.isconfirmed
         array.push(bIsLow, true)
         array.push(bState, 0)
         array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
-        array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.normal))
+        array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
     if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
@@ -212,7 +220,7 @@ if barstate.isconfirmed
         array.push(bIsLow, false)
         array.push(bState, 0)
         array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
-        array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.normal))
+        array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
@@ -242,14 +250,14 @@ if barstate.isconfirmed
                     obT = isLow ? bLgT : bLrT
                     if obB and not na(obTop) and not array.includes(bObT, obT)
                         obCol = isLow ? COL_DN : COL_UP
-                        array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = bName + " OB", text_color = color.new(obCol, 20), text_size = size.small))
+                        array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = bName + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
                         array.push(bObBull, not isLow)
                         array.push(bObTop, obTop)
                         array.push(bObBot, obBot)
                         array.push(bObT, obT)
                         array.push(bObState, 0)
                     if closeThrough and flipB
-                        array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = COL_FLIPTXT, text_size = size.normal))
+                        array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
                         array.set(bState, i, 1)
                     else
                         array.set(bState, i, 2)
@@ -269,6 +277,8 @@ if barstate.isconfirmed
                 box.set_right(array.get(bObBox, i), time)
                 dead = array.get(bObBull, i) ? nz(bClose, array.get(bObBot, i) + 1) < array.get(bObBot, i) : nz(bClose, array.get(bObTop, i) - 1) > array.get(bObTop, i)
                 if dead
+                    if unmitOnly
+                        box.delete(array.get(bObBox, i))
                     array.set(bObState, i, 1)
     while array.size(bObBox) > maxObs
         box.delete(array.get(bObBox, 0))
