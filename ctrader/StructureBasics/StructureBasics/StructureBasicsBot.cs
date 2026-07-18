@@ -83,6 +83,19 @@ namespace cAlgo.Robots
         [Parameter("Verbose log", Group = "Risk", DefaultValue = true)]
         public bool Verbose { get; set; }
 
+        [Parameter("Draw on chart (levels, BOS, OBs, TP)", Group = "Risk", DefaultValue = true)]
+        public bool Draw { get; set; }
+
+        // ── chart colors (same palette as the Pine script) ──────────────────
+        private static readonly Color ColUp = Color.FromArgb(255, 74, 222, 128);      // #4ADE80
+        private static readonly Color ColDn = Color.FromArgb(255, 251, 113, 133);     // #FB7185
+        private static readonly Color ColUpFill = Color.FromArgb(45, 74, 222, 128);
+        private static readonly Color ColDnFill = Color.FromArgb(45, 251, 113, 133);
+        private static readonly Color ColUpDim = Color.FromArgb(18, 74, 222, 128);
+        private static readonly Color ColDnDim = Color.FromArgb(18, 251, 113, 133);
+        private static readonly Color ColBos = Color.FromArgb(255, 96, 165, 250);     // #60A5FA
+        private static readonly Color ColSweep = Color.FromArgb(255, 251, 191, 36);   // #FBBF24
+
         // ── state ───────────────────────────────────────────────────────────
         private Bars _m5, _h1, _h4, _d1;
         private int _m5Done, _h1Done;               // last processed index per series
@@ -104,6 +117,8 @@ namespace cAlgo.Robots
             public double Price;
             public bool IsLow;
             public int State;                       // 0 live, 2 done, 3 swept
+            public DateTime PivotT;
+            public string Key;                      // chart object name base
             // OB candidate stashed at a sweep (drawn only on upgrade)
             public bool HasPend;
             public double PendTop, PendBot;
@@ -117,7 +132,14 @@ namespace cAlgo.Robots
             public int State;                       // 0 live, 1 frozen (mitigated/dead)
             public bool Armed, Left, Flipped;
             public DateTime CandleT;
+            public string Key;                      // chart object name base
         }
+
+        // active TP line of the open trade
+        private string _tpName;
+        private double _tpPrice;
+        private DateTime _tpStart;
+        private Color _tpCol;
 
         private Layer _a, _b;
         private int _trend;                          // 1 up, -1 down (last H4 BOS)
@@ -202,12 +224,16 @@ namespace cAlgo.Robots
                     if (isPl && pt != ly.LastPivotLowT)
                     {
                         ly.LastPivotLowT = pt;
-                        ly.Levels.Add(new Level { Price = b.LowPrices[c], IsLow = true, State = 0 });
+                        var lv = new Level { Price = b.LowPrices[c], IsLow = true, State = 0, PivotT = pt, Key = string.Format("{0}-L-{1}", ly.Name, pt.Ticks) };
+                        ly.Levels.Add(lv);
+                        DrawLevel(ly, lv, b.OpenTimes[idx]);
                     }
                     if (isPh && pt != ly.LastPivotHighT)
                     {
                         ly.LastPivotHighT = pt;
-                        ly.Levels.Add(new Level { Price = b.HighPrices[c], IsLow = false, State = 0 });
+                        var lv = new Level { Price = b.HighPrices[c], IsLow = false, State = 0, PivotT = pt, Key = string.Format("{0}-H-{1}", ly.Name, pt.Ticks) };
+                        ly.Levels.Add(lv);
+                        DrawLevel(ly, lv, b.OpenTimes[idx]);
                     }
                     while (ly.Levels.Count > 2 * MaxKeep)
                         ly.Levels.RemoveAt(0);
@@ -231,6 +257,15 @@ namespace cAlgo.Robots
             if (CloseOnTrendFlip)
                 CloseAgainstTrend();
 
+            // extend the open trade's dotted TP line to the current bar
+            if (Draw && _tpName != null)
+            {
+                if (Positions.FindAll(Label, SymbolName).Length > 0)
+                    Chart.DrawTrendLine(_tpName, _tpStart, _tpPrice, t, _tpPrice, _tpCol, 2, LineStyle.Dots);
+                else
+                    _tpName = null;   // trade over — line stays frozen where it ended
+            }
+
             // refresh the opposite-candle memory LAST, so lookups above see
             // the last opposite H1 candle strictly BEFORE the crossing bar
             if (cl < op)
@@ -247,6 +282,19 @@ namespace cAlgo.Robots
             }
         }
 
+        private void DrawLevel(Layer ly, Level lv, DateTime rightT)
+        {
+            if (!Draw) return;
+            Chart.DrawTrendLine(lv.Key + "-ln", lv.PivotT, lv.Price, rightT, lv.Price, Color.Silver, 1, LineStyle.Solid);
+            Chart.DrawText(lv.Key + "-cap", ly.Name, lv.PivotT, lv.Price, Color.White);
+        }
+
+        private void MarkBreak(Level lv, DateTime t, bool bos)
+        {
+            if (!Draw) return;
+            Chart.DrawText(lv.Key + "-brk", bos ? "BOS" : "Sweep", t, lv.Price, bos ? ColBos : ColSweep);
+        }
+
         private void RunLevels(Layer ly, double hi, double lo, DateTime t, bool drivesTrend)
         {
             foreach (var lv in ly.Levels)
@@ -254,6 +302,12 @@ namespace cAlgo.Robots
                 bool closeThrough = !double.IsNaN(ly.LastClose) &&
                     (lv.IsLow ? ly.LastClose < lv.Price : ly.LastClose > lv.Price);
                 bool wickThrough = lv.IsLow ? lo < lv.Price : hi > lv.Price;
+
+                if (lv.State == 0 && !closeThrough && !wickThrough)
+                {
+                    DrawLevel(ly, lv, t);   // still live — extend the line
+                    continue;
+                }
 
                 if (lv.State == 0 && (closeThrough || wickThrough))
                 {
@@ -263,6 +317,7 @@ namespace cAlgo.Robots
                     DateTime obT = obBull ? _redT : _grnT;
                     bool haveOb = obBull ? !double.IsNaN(_redTop) : !double.IsNaN(_grnHi);
 
+                    DrawLevel(ly, lv, t);   // freeze the line at the break bar
                     if (closeThrough)
                     {
                         if (drivesTrend)
@@ -270,6 +325,7 @@ namespace cAlgo.Robots
                         if (haveOb)
                             AddOb(ly, obBull, obTop, obBot, obT, t);
                         lv.State = 2;
+                        MarkBreak(lv, t, true);
                         if (Verbose)
                             Print("[BOS] {0} {1} {2:F2} @ {3:yyyy-MM-dd HH:mm}", ly.Name, lv.IsLow ? "low" : "high", lv.Price, t);
                     }
@@ -288,6 +344,7 @@ namespace cAlgo.Robots
                                 AddOb(ly, obBull, obTop, obBot, obT, t);
                         }
                         lv.State = 3;
+                        MarkBreak(lv, t, false);
                         if (Verbose)
                             Print("[SWEEP] {0} {1} {2:F2} @ {3:yyyy-MM-dd HH:mm}", ly.Name, lv.IsLow ? "low" : "high", lv.Price, t);
                     }
@@ -300,6 +357,7 @@ namespace cAlgo.Robots
                     if (ObBosOnly && lv.HasPend)
                         AddOb(ly, !lv.IsLow, lv.PendTop, lv.PendBot, lv.PendT, t);
                     lv.State = 2;
+                    MarkBreak(lv, t, true);   // sweep label upgrades to BOS
                     if (Verbose)
                         Print("[BOS] {0} {1} {2:F2} (sweep upgrade) @ {3:yyyy-MM-dd HH:mm}", ly.Name, lv.IsLow ? "low" : "high", lv.Price, t);
                 }
@@ -310,12 +368,23 @@ namespace cAlgo.Robots
         {
             if (ly.Obs.Any(o => o.CandleT == candleT))
                 return;
-            ly.Obs.Add(new OrderBlock { Top = top, Bot = bot, Bull = bull, State = 0, CandleT = candleT });
+            var ob = new OrderBlock { Top = top, Bot = bot, Bull = bull, State = 0, CandleT = candleT, Key = string.Format("ob-{0}-{1}", ly.Name, candleT.Ticks) };
+            ly.Obs.Add(ob);
             while (ly.Obs.Count > MaxObs)
                 ly.Obs.RemoveAt(0);
+            DrawOb(ob, t);
             if (Verbose)
                 Print("[OB] {0} {1} H1 OB {2:F2}-{3:F2} (candle {4:MM-dd HH:mm}) @ {5:yyyy-MM-dd HH:mm}",
                     ly.Name, bull ? "bull" : "bear", bot, top, candleT, t);
+        }
+
+        private void DrawOb(OrderBlock ob, DateTime rightT)
+        {
+            if (!Draw) return;
+            Color fill = ob.State == 1 ? (ob.Bull ? ColUpDim : ColDnDim) : (ob.Bull ? ColUpFill : ColDnFill);
+            var rc = Chart.DrawRectangle(ob.Key, ob.CandleT, ob.Top, rightT, ob.Bot, fill);
+            rc.IsFilled = true;
+            Chart.DrawText(ob.Key + "-cap", ob.Flipped ? "H1 OB Flip" : "H1 OB", ob.CandleT, ob.Top, ob.Bull ? ColUp : ColDn);
         }
 
         private void RunObLifecycle(Layer ly, double hi, double lo, double cl, DateTime t)
@@ -333,6 +402,7 @@ namespace cAlgo.Robots
                             ob.Bull = !ob.Bull;
                             ob.Flipped = true;
                             ob.Left = false;
+                            DrawOb(ob, t);
                             if (Verbose)
                                 Print("[FLIP] {0} OB {1:F2}-{2:F2} now {3} @ {4:yyyy-MM-dd HH:mm}",
                                     ly.Name, ob.Bot, ob.Top, ob.Bull ? "bull" : "bear", t);
@@ -341,6 +411,7 @@ namespace cAlgo.Robots
                         {
                             ob.State = 1;
                             ob.Armed = false;
+                            DrawOb(ob, t);
                         }
                     }
                     else
@@ -352,10 +423,13 @@ namespace cAlgo.Robots
                         {
                             ob.State = 1;
                             ob.Armed = true;
+                            DrawOb(ob, t);
                             if (Verbose)
                                 Print("[ARM] {0} {1} OB {2:F2}-{3:F2} retested @ {4:yyyy-MM-dd HH:mm}",
                                     ly.Name, ob.Bull ? "bull" : "bear", ob.Bot, ob.Top, t);
                         }
+                        else
+                            DrawOb(ob, t);   // still live — extend the box
                     }
                 }
                 else if (ob.State == 1 && ob.Armed)
@@ -483,9 +557,27 @@ namespace cAlgo.Robots
             var type = bull ? TradeType.Buy : TradeType.Sell;
             var res = ExecuteMarketOrder(type, SymbolName, volume, Label, slPips, tpPips);
             if (res.IsSuccessful)
+            {
                 Print("[ENTRY] {0} @ {1:F2} SL {2:F2} TP {3} ({4} OB {5:F2}-{6:F2}{7}) t={8:yyyy-MM-dd HH:mm}",
                     bull ? "BUY" : "SELL", entry, sl, double.IsNaN(tgt) ? "none" : tgt.ToString("F2"),
                     ob.Bull ? "bull" : "bear", ob.Bot, ob.Top, ob.Flipped ? " flip" : "", t);
+                if (Draw)
+                {
+                    string en = string.Format("sig-{0}", t.Ticks);
+                    Color c = bull ? ColUp : ColDn;
+                    Chart.DrawIcon(en + "-ic", bull ? ChartIconType.UpTriangle : ChartIconType.DownTriangle, t, entry, c);
+                    Chart.DrawText(en + "-txt", bull ? "BUY" : "SELL", t, entry, c);
+                    if (!double.IsNaN(tgt))
+                    {
+                        Chart.DrawText(en + "-tptxt", string.Format("TP {0:F2}", tgt), t, tgt, c);
+                        _tpName = en + "-tp";
+                        _tpPrice = tgt;
+                        _tpStart = t;
+                        _tpCol = c;
+                        Chart.DrawTrendLine(_tpName, _tpStart, _tpPrice, t, _tpPrice, _tpCol, 2, LineStyle.Dots);
+                    }
+                }
+            }
             else
                 Print("[ERROR] order failed: {0}", res.Error);
         }
