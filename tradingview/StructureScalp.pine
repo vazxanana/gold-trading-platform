@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE SCALP v1.0 ───────────────────────────────────────────────────
+// ─── STRUCTURE SCALP STRATEGY v1.0 ──────────────────────────────────────────
 // Scalp variant of StructureBasics v0.15. Same structure engine — H4/Daily
 // levels, BOS vs Sweep, retest arming, OB flips, H4 trend gate — with the
 // execution stack dropped a gear:
@@ -7,7 +7,9 @@
 //   • Entry trigger: an M1 change of character inside the retested OB
 //   • Target       : fixed 1:1 — SL beyond the OB far edge (+ buffer), TP
 //                    the same distance from the signal price
-// Chart on M1–M15 for exact streams. Original notes below.
+// Runs in the Strategy Tester: market entry on the signal, exit bracket at
+// the 1:1 TP / OB-edge SL, and an early close when the H4 trend flips
+// against the position. Chart on M1–M15 for exact streams.
 // ────────────────────────────────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
@@ -57,7 +59,7 @@
 //     direction of the last H4 BOS (a close through a swing high = up, a
 //     close through a swing low = down); BUYs fire only in an up H4 trend,
 //     SELLs only in a down one. A badge in the corner shows the live trend.
-indicator("Structure Scalp", "StructScalp", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
+strategy("Structure Scalp", "StructScalp", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0, calc_on_every_tick = false)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
 tfA   = input.timeframe("240", "Structure timeframe A")
@@ -207,9 +209,14 @@ f_fireSig(bull, slP) =>
         array.push(sigTgt, slP)
         array.push(sigBull, not bull)
         array.push(sigState, 0)
+    tgt
 
 buySig = false
 sellSig = false
+float buySL = na
+float buyTP = na
+float sellSL = na
+float sellTP = na
 
 if barstate.isconfirmed
     aName = f_tfName(tfA)
@@ -440,11 +447,15 @@ if barstate.isconfirmed
                 if inval
                     array.set(aObArmed, i, false)
                 else if sBull and chUp and (not trendFilter or aTrend == 1)
-                    f_fireSig(true, array.get(aObBot, i) - slBuf)
+                    slP = array.get(aObBot, i) - slBuf
+                    buyTP := f_fireSig(true, slP)
+                    buySL := slP
                     buySig := true
                     array.set(aObArmed, i, false)
                 else if not sBull and chDn and (not trendFilter or aTrend == -1)
-                    f_fireSig(false, array.get(aObTop, i) + slBuf)
+                    slP = array.get(aObTop, i) + slBuf
+                    sellTP := f_fireSig(false, slP)
+                    sellSL := slP
                     sellSig := true
                     array.set(aObArmed, i, false)
     while array.size(aObBox) > maxObs
@@ -630,11 +641,15 @@ if barstate.isconfirmed
                 if inval
                     array.set(bObArmed, i, false)
                 else if sBull and chUp and (not trendFilter or aTrend == 1)
-                    f_fireSig(true, array.get(bObBot, i) - slBuf)
+                    slP = array.get(bObBot, i) - slBuf
+                    buyTP := f_fireSig(true, slP)
+                    buySL := slP
                     buySig := true
                     array.set(bObArmed, i, false)
                 else if not sBull and chDn and (not trendFilter or aTrend == -1)
-                    f_fireSig(false, array.get(bObTop, i) + slBuf)
+                    slP = array.get(bObTop, i) + slBuf
+                    sellTP := f_fireSig(false, slP)
+                    sellSL := slP
                     sellSig := true
                     array.set(bObArmed, i, false)
     while array.size(bObBox) > maxObs
@@ -668,6 +683,20 @@ if barstate.isconfirmed
 
 alertcondition(buySig, "StructScalp BUY", "M15 OB retested + M1 ChoCh up — buy, 1:1 target")
 alertcondition(sellSig, "StructScalp SELL", "M15 OB retested + M1 ChoCh down — sell, 1:1 target")
+
+// ── order management ────────────────────────────────────────────────────────
+if buySig
+    strategy.entry("Long", strategy.long)
+    strategy.exit("LongX", "Long", stop = buySL, limit = buyTP)
+if sellSig
+    strategy.entry("Short", strategy.short)
+    strategy.exit("ShortX", "Short", stop = sellSL, limit = sellTP)
+
+// follow structure: an H4 flip against the position closes it
+if strategy.position_size > 0 and aTrend == -1
+    strategy.close("Long", comment = "H4 flip")
+if strategy.position_size < 0 and aTrend == 1
+    strategy.close("Short", comment = "H4 flip")
 
 // live H4 trend badge
 var table trendTbl = table.new(position.top_right, 1, 1)
