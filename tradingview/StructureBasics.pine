@@ -27,6 +27,8 @@ obB   = input.bool(true, "Order blocks for B")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(6, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
+refA  = input.timeframe("60", "OB refine timeframe for A (H4 bos → H1 OB)")
+refB  = input.timeframe("240", "OB refine timeframe for B (Daily bos → H4 OB)")
 
 colLvlTxt    = input.color(color.white, "Caption — levels (H4/Daily)", group = "Caption colors")
 colObBearTxt = input.color(#FB7185, "Caption — bearish OB", group = "Caption colors")
@@ -74,6 +76,8 @@ f_htf() =>
 
 [aPl, aPh, aPT, aBodyHi, aBodyLo, aClose, aLgHi, aLgLo, aLgT, aLrHi, aLrLo, aLrT] = request.security(syminfo.tickerid, tfA, f_htf(), lookahead = barmerge.lookahead_on)
 [bPl, bPh, bPT, bBodyHi, bBodyLo, bClose, bLgHi, bLgLo, bLgT, bLrHi, bLrLo, bLrT] = request.security(syminfo.tickerid, tfB, f_htf(), lookahead = barmerge.lookahead_on)
+[ar1, ar2, ar3, ar4, ar5, ar6, arLgHi, arLgLo, arLgT, arLrHi, arLrLo, arLrT] = request.security(syminfo.tickerid, refA, f_htf(), lookahead = barmerge.lookahead_on)
+[br1, br2, br3, br4, br5, br6, brLgHi, brLgLo, brLgT, brLrHi, brLrLo, brLrT] = request.security(syminfo.tickerid, refB, f_htf(), lookahead = barmerge.lookahead_on)
 
 // ── layer A state ───────────────────────────────────────────────────────────
 var aP = array.new<float>()
@@ -111,6 +115,8 @@ var bObState = array.new<int>()
 
 aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
 bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
+arOn = timeframe.in_seconds(refA) >= timeframe.in_seconds(timeframe.period)
+brOn = timeframe.in_seconds(refB) >= timeframe.in_seconds(timeframe.period)
 
 if barstate.isconfirmed
     aName = f_tfName(tfA)
@@ -159,12 +165,13 @@ if barstate.isconfirmed
                 wickThrough = isLow ? low < p : high > p
                 if closeThrough or wickThrough
                     // structure break → mark the order block that fed the move
-                    obTop = isLow ? aLgHi : aLrHi
-                    obBot = isLow ? aLgLo : aLrLo
-                    obT = isLow ? aLgT : aLrT
+                    obTop = arOn ? (isLow ? arLgHi : arLrHi) : (isLow ? aLgHi : aLrHi)
+                    obBot = arOn ? (isLow ? arLgLo : arLrLo) : (isLow ? aLgLo : aLrLo)
+                    obT = arOn ? (isLow ? arLgT : arLrT) : (isLow ? aLgT : aLrT)
+                    obName = arOn ? f_tfName(refA) : aName
                     if obA and not na(obTop) and not array.includes(aObT, obT)
                         obCol = isLow ? COL_DN : COL_UP
-                        array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = aName + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
+                        array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = obName + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
                         array.push(aObBull, not isLow)
                         array.push(aObTop, obTop)
                         array.push(aObBot, obBot)
@@ -245,12 +252,13 @@ if barstate.isconfirmed
                 closeThrough = isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
                 if closeThrough or wickThrough
-                    obTop = isLow ? bLgHi : bLrHi
-                    obBot = isLow ? bLgLo : bLrLo
-                    obT = isLow ? bLgT : bLrT
+                    obTop = brOn ? (isLow ? brLgHi : brLrHi) : (isLow ? bLgHi : bLrHi)
+                    obBot = brOn ? (isLow ? brLgLo : brLrLo) : (isLow ? bLgLo : bLrLo)
+                    obT = brOn ? (isLow ? brLgT : brLrT) : (isLow ? bLgT : bLrT)
+                    obNameB = brOn ? f_tfName(refB) : bName
                     if obB and not na(obTop) and not array.includes(bObT, obT)
                         obCol = isLow ? COL_DN : COL_UP
-                        array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = bName + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
+                        array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 82), border_color = color.new(obCol, 50), text = obNameB + " OB", text_color = isLow ? colObBearTxt : colObBullTxt, text_size = size.small))
                         array.push(bObBull, not isLow)
                         array.push(bObTop, obTop)
                         array.push(bObBot, obBot)
