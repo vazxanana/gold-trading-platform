@@ -103,11 +103,14 @@ f_ohlc() =>
 h1tf = timeframe.in_seconds(timeframe.period) <= 3600 ? "60" : timeframe.period
 [h1O, h1H, h1L, h1C, h1T] = request.security(syminfo.tickerid, h1tf, f_ohlc(), lookahead = barmerge.lookahead_on)
 
-// M15 candle stream — used to refine each H1 OB down to the last opposite
-// M15 candle inside it (skipped when the chart is above M15)
-useR15 = timeframe.in_seconds(timeframe.period) <= 900
-m15tf = useR15 ? "15" : timeframe.period
+// M15 candles — used to refine each H1 OB down to the last opposite M15
+// candle inside it. Chart at/below M15 → confirmed-candle security stream;
+// chart above M15 (H1 etc.) → M15 intrabar arrays of each chart bar.
+useLo = timeframe.in_seconds(timeframe.period) > 900
+m15tf = useLo ? timeframe.period : "15"
 [s15O, s15H, s15L, s15C, s15T] = request.security(syminfo.tickerid, m15tf, f_ohlc(), lookahead = barmerge.lookahead_on)
+m15lo = timeframe.in_seconds(timeframe.period) >= 900 ? "15" : timeframe.period
+[l15O, l15H, l15L, l15C, l15T] = request.security_lower_tf(syminfo.tickerid, m15lo, [open, high, low, close, time])
 
 // M5 intrabar stream for ChoCh detection (chart TF itself when at/below M5)
 m5tf = timeframe.in_seconds(timeframe.period) >= 300 ? "5" : timeframe.period
@@ -128,7 +131,7 @@ f_refine(obBull, hT) =>
     float rTop = na
     float rBot = na
     n = array.size(q15T)
-    if n > 0 and useR15
+    if n > 0
         for k = 0 to n - 1
             t15 = array.get(q15T, k)
             if t15 >= hT and t15 < hT + 3600000
@@ -271,20 +274,34 @@ if barstate.isconfirmed
             lastGrnHi := h1H
             lastGrnT := h1T
 
-    // append each newly confirmed M15 candle to the refinement buffer
-    if useR15 and not na(s15T) and (na(last15T) or s15T != last15T)
+    // append each newly confirmed M15 candle to the refinement buffer:
+    // from intrabar arrays when the chart is above M15, from the confirmed
+    // stream otherwise
+    if useLo
+        nL = array.size(l15T)
+        if nL > 0
+            for k = 0 to nL - 1
+                t15n = array.get(l15T, k)
+                if na(last15T) or t15n > last15T
+                    last15T := t15n
+                    array.push(q15T, t15n)
+                    array.push(q15O, array.get(l15O, k))
+                    array.push(q15H, array.get(l15H, k))
+                    array.push(q15L, array.get(l15L, k))
+                    array.push(q15C, array.get(l15C, k))
+    else if not na(s15T) and (na(last15T) or s15T != last15T)
         last15T := s15T
         array.push(q15T, s15T)
         array.push(q15O, s15O)
         array.push(q15H, s15H)
         array.push(q15L, s15L)
         array.push(q15C, s15C)
-        while array.size(q15T) > 200
-            array.remove(q15T, 0)
-            array.remove(q15O, 0)
-            array.remove(q15H, 0)
-            array.remove(q15L, 0)
-            array.remove(q15C, 0)
+    while array.size(q15T) > 200
+        array.remove(q15T, 0)
+        array.remove(q15O, 0)
+        array.remove(q15H, 0)
+        array.remove(q15L, 0)
+        array.remove(q15C, 0)
 
     // walk this bar's M5 candles: confirm swing points (strength 2), and an
     // M5 close breaking the latest swing = change of character. Each swing is
