@@ -36,6 +36,7 @@ tgtOff     = input.float(0.5, "Target front-run offset (USD)", step = 0.1)
 onePos     = input.bool(true, "One signal at a time (wait for SL/TP hit)")
 showZones  = input.bool(true, "Draw current zones")
 showTrade  = input.bool(true, "Draw signal zone box + label")
+showLevels = input.bool(true, "Draw H4/D liquidity levels (unswept swings)")
 showDiag   = input.bool(true, "Show diagnostics (armed tint + break marks)")
 showChartOB = input.bool(true, "Mark chart-TF order blocks (break origins)")
 useFib     = input.bool(true, "Golden pocket filter (arm only zones near fib ~0.68)")
@@ -940,6 +941,33 @@ if showZones and barstate.islast
     if not na(zBandLo)
         bandLn1 := line.new(bar_index - 60, zBandLo, bar_index, zBandLo, color = color.new(COL_GOLD, 30), style = line.style_dotted, width = 1)
         bandLn2 := line.new(bar_index - 60, zBandHi, bar_index, zBandHi, color = color.new(COL_GOLD, 30), style = line.style_dotted, width = 1)
+
+// liquidity level ladder: the unswept swing lows/highs of the zone and
+// target timeframes — the "H4"/"D" tagged lines of the reference charts.
+// Lows below price are downside targets, highs above are upside targets;
+// a level disappears from the ladder the bar after price sweeps it.
+var lvlLines = array.new<line>()
+var lvlLabels = array.new<label>()
+if showLevels and barstate.islast
+    if array.size(lvlLines) > 0
+        for lnx in lvlLines
+            line.delete(lnx)
+        array.clear(lvlLines)
+    if array.size(lvlLabels) > 0
+        for lbx in lvlLabels
+            label.delete(lbx)
+        array.clear(lvlLabels)
+    lvPrices = array.from(zl1, zl2, zl3, tl1, tl2, zh1, zh2, th1, th2)
+    lvTags = array.from("H4", "H4", "H4", "D", "D", "H4", "H4", "D", "D")
+    for li = 0 to 8
+        lp = array.get(lvPrices, li)
+        if not na(lp)
+            isD = li == 3 or li == 4 or li == 7 or li == 8
+            lcl = lp < close ? color.new(#60A5FA, 30) : color.new(COL_SUPPLY, 30)
+            lline = line.new(bar_index - 90, lp, bar_index + 5, lp, color = lcl, width = isD ? 2 : 1, style = isD ? line.style_solid : line.style_dashed)
+            llab = label.new(bar_index + 6, lp, array.get(lvTags, li) + " " + str.tostring(lp, format.mintick), style = label.style_label_left, color = color.new(color.black, 60), textcolor = lcl, size = size.small)
+            array.push(lvlLines, lline)
+            array.push(lvlLabels, llab)
 
 // ── Status table (the cBot's [GATE] diagnostics, on-chart) ──────────────────
 var table info = table.new(position.top_right, 2, 11, bgcolor = color.new(color.black, 40))
