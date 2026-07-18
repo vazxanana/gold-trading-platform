@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.12 ─────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.13 ─────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -167,18 +167,19 @@ var sigTgt = array.new<float>()
 var sigBull = array.new<bool>()
 var sigState = array.new<int>()    // 0 running, 1 target hit / done
 
-// nearest H4 (layer A) swing high above price for buys, swing low below for sells
+// target = the marked H4 level still holding: the nearest LIVE (untaken,
+// unswept) layer-A swing high above price for buys / swing low below for
+// sells — broken or swept pivots are spent liquidity and never qualify
 f_h4Target(bull) =>
     float tgt = na
     if array.size(aP) > 0
-        for q = array.size(aP) - 1 to 0
-            pp = array.get(aP, q)
-            if bull and not array.get(aIsLow, q) and pp > close
-                tgt := pp
-                break
-            if not bull and array.get(aIsLow, q) and pp < close
-                tgt := pp
-                break
+        for q = 0 to array.size(aP) - 1
+            if array.get(aState, q) == 0
+                pp = array.get(aP, q)
+                if bull and not array.get(aIsLow, q) and pp > close and (na(tgt) or pp < tgt)
+                    tgt := pp
+                if not bull and array.get(aIsLow, q) and pp < close and (na(tgt) or pp > tgt)
+                    tgt := pp
     tgt
 
 f_fireSig(bull) =>
