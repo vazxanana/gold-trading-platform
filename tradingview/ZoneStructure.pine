@@ -27,6 +27,7 @@ useD1      = input.bool(false, "Require D1 trend alignment")
 expiryBars = input.int(192, "Zone armed expiry (chart bars)", minval = 4)
 tfZone     = input.timeframe("240", "Zone/trend timeframe")
 tfTgt      = input.timeframe("D", "Extra target timeframe")
+tfLines    = input.timeframe("", "Break-of-structure lines timeframe (blank = chart)")
 slBuf      = input.float(1.5, "SL buffer beyond structure (USD)", step = 0.1)
 minSl      = input.float(3.0, "Min SL (USD)", step = 0.5)
 maxSl      = input.float(60.0, "Max SL (USD)", step = 1.0)
@@ -211,6 +212,7 @@ f_engine(needView) =>
     evU = 0
     float evP = na
     int evI = na
+    float evT1 = na
     float evZhi = na
     float evZlo = na
     float evZot = na
@@ -264,6 +266,7 @@ f_engine(needView) =>
                 evU := 1
                 evP := hiPrice
                 evI := hiIdx
+                evT1 := array.get(aT, hiIdx)
                 org = f_legOrigin(aH, aL, hiIdx, i, true)
                 f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, true, trendI != 1, i)
                 evZhi := array.get(znHi, array.size(znHi) - 1)
@@ -285,6 +288,7 @@ f_engine(needView) =>
                 evU := 0
                 evP := loPrice
                 evI := loIdx
+                evT1 := array.get(aT, loIdx)
                 org = f_legOrigin(aH, aL, loIdx, i, false)
                 f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, false, trendI != -1, i)
                 evZhi := array.get(znHi, array.size(znHi) - 1)
@@ -546,20 +550,27 @@ f_engine(needView) =>
             pProtId := loIdx
 
     prot = trendI == 1 ? loPrice : trendI == -1 ? hiPrice : na
-    [evC, evU, evP, evI, evZhi, evZlo, evZot, trendI, prot, pBandLo, pBandHi, pProtId, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, L5, L6, L7, L8, A1, A2, A3, A4, A5, A6, A7, A8]
+    [evC, evU, evP, evI, evT1, time, evZhi, evZlo, evZot, trendI, prot, pBandLo, pBandHi, pProtId, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, L5, L6, L7, L8, A1, A2, A3, A4, A5, A6, A7, A8]
 
 // confirmed-bar wrapper: [1] + lookahead_on = state as of the last COMPLETED
 // higher-TF bar on every chart bar — no repaint, no look-ahead
 f_conf() =>
-    [eC, eU, eP, eI, eZh, eZl, eZo, tI, pr, bL, bH, bP, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(true)
+    [eC, eU, eP, eI, eT1, eTb, eZh, eZl, eZo, tI, pr, bL, bH, bP, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(true)
     [tI[1], bL[1], bH[1], bP[1], q1[1], q2[1], q3[1], q4[1], q5[1], q6[1], q7[1], q8[1], q9[1], q10[1], q11[1], q12[1], q13[1], q14[1], q15[1], q16[1], q17[1], q18[1], q19[1], q20[1], q21[1], q22[1], q23[1], q24[1], q25[1], q26[1], q27[1], q28[1], q29[1], q30[1], q31[1], q32[1], w1[1], w2[1], w3[1], w4[1], w5[1], w6[1], w7[1], w8[1], w9[1], w10[1], w11[1], w12[1], w13[1], w14[1], w15[1], w16[1]]
 
+// confirmed break events of the selected lines timeframe
+f_lines() =>
+    [eC, eU, eP, eI, eT1, eTb, eZh, eZl, eZo, tI, pr, bL, bH, bP, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(false)
+    [eC[1], eU[1], eP[1], eT1[1], eTb[1]]
+
 // ── Engine instances: chart (trigger), zone TF, target TF ───────────────────
-[evCode, evUp, evPrice, evI1, evZhi, evZlo, evZot, m15Trend, m15Prot, cb1, cb2, cb3, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40, c41, c42, c43, c44, c45, c46, c47, c48] = f_engine(false)
+[evCode, evUp, evPrice, evI1, evT1c, evTbc, evZhi, evZlo, evZot, m15Trend, m15Prot, cb1, cb2, cb3, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40, c41, c42, c43, c44, c45, c46, c47, c48] = f_engine(false)
 
 [zTrend, zBandLo, zBandHi, zPidx, zs1hi, zs1lo, zs1fr, zs1ot, zs2hi, zs2lo, zs2fr, zs2ot, zs3hi, zs3lo, zs3fr, zs3ot, zs4hi, zs4lo, zs4fr, zs4ot, zd1hi, zd1lo, zd1fr, zd1ot, zd2hi, zd2lo, zd2fr, zd2ot, zd3hi, zd3lo, zd3fr, zd3ot, zd4hi, zd4lo, zd4fr, zd4ot, zl1, zl2, zl3, zl4, zl5, zl6, zl7, zl8, zh1, zh2, zh3, zh4, zh5, zh6, zh7, zh8] = request.security(syminfo.tickerid, tfZone, f_conf(), lookahead = barmerge.lookahead_on)
 
 [dTrend, dv0a, dv0b, dv0c, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, tl1, tl2, tl3, tl4, tl5, tl6, tl7, tl8, th1, th2, th3, th4, th5, th6, th7, th8] = request.security(syminfo.tickerid, tfTgt, f_conf(), lookahead = barmerge.lookahead_on)
+
+[lnC, lnU, lnP, lnT1, lnTb] = request.security(syminfo.tickerid, tfLines, f_lines(), lookahead = barmerge.lookahead_on)
 
 zTrendS = nz(zTrend, 0)
 dTrendS = nz(dTrend, 0)
@@ -831,13 +842,17 @@ if barstate.isconfirmed
 armedNow = array.size(armHi)
 bgcolor(showDiag and armedNow > 0 ? color.new(color.yellow, 90) : na, title = "Armed zone window")
 
-// break lines: broken swing level -> break bar (green up / red down),
-// "ChoCh" tagged; bos lines drawn untagged, like the cTrader indicator
-if showDiag and barstate.isconfirmed and evCode > 0
-    lc = evUp == 1 ? COL_DEMAND : COL_SUPPLY
-    line.new(evI1, evPrice, bar_index, evPrice, color = color.new(lc, 25), width = 1)
-    if evCode == 1
-        label.new(math.round(math.avg(evI1, bar_index)), evPrice, "ChoCh", style = label.style_none, textcolor = color.new(lc, 10), size = size.tiny)
+// break-of-structure lines of the SELECTED timeframe: broken swing level ->
+// break bar (green up / red down), "ChoCh" tagged, bos untagged. One line
+// per break (deduped on the break bar's time).
+var float lastLineTb = na
+if showDiag and barstate.isconfirmed and nz(lnC) > 0 and not na(lnT1)
+    if na(lastLineTb) or lnTb != lastLineTb
+        lastLineTb := lnTb
+        lcol = nz(lnU) == 1 ? COL_DEMAND : COL_SUPPLY
+        line.new(math.round(lnT1), lnP, math.round(lnTb), lnP, xloc = xloc.bar_time, color = color.new(lcol, 25), width = 1)
+        if nz(lnC) == 1
+            label.new(math.round(math.avg(lnT1, lnTb)), lnP, "ChoCh", xloc = xloc.bar_time, style = label.style_none, textcolor = color.new(lcol, 10), size = size.tiny)
 plotshape(sigLong, "Long signal", style = shape.triangleup, location = location.belowbar, color = COL_DEMAND, size = size.small)
 plotshape(sigShort, "Short signal", style = shape.triangledown, location = location.abovebar, color = COL_SUPPLY, size = size.small)
 
