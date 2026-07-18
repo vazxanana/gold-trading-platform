@@ -98,6 +98,7 @@ internal static class Replay
         Console.WriteLine($"── Screenshot replay: {bars.Count} M15 bars {Ts(0):yyyy-MM-dd} → {Ts(bars.Count - 1):yyyy-MM-dd} ──");
         Console.WriteLine($"   path check: Jun17 {Interp(28.8):F0}  Jun24 {Interp(35):F0}  Jul5 {Interp(46):F0}  Jul9 {Interp(50.3):F0}  Jul14 {Interp(55.3):F0}");
 
+        Program.SkipTrace = new List<string>();
         var batch = Program.Simulate(bars).entries;
         var stream = EquivTests.SimulateStream(bars);
 
@@ -128,7 +129,17 @@ internal static class Replay
         Check(batch.Count > 0 && match == batch.Count && stream.Count == batch.Count,
             $"Pine mirror takes the SAME trades ({match}/{batch.Count} matched, stream={stream.Count})");
         Console.WriteLine(fails == 0 ? "\nREPLAY: ALL SCREENSHOT TRADES REPRODUCED" : $"\nREPLAY: {fails} check(s) MISSING");
-        if (fails > 0) Funnel(bars);
+        if (fails > 0)
+        {
+            Console.WriteLine("\n── Gate trace in missing windows ──");
+            foreach (var s in Program.SkipTrace)
+            {
+                int bar = int.Parse(s.Split('|')[0]);
+                double d = bar / 96.0;
+                if ((d >= 28 && d <= 36) || (d >= 51 && d <= 56))
+                    Console.WriteLine($"  {Ts(bar):MMM dd HH:mm}  {s.Split('|')[1]}");
+            }
+        }
     }
 
     // daily funnel dump: what did the zone layer see and why did nothing arm

@@ -35,6 +35,8 @@ internal static class Program
     const int MaxZonesPerSide = 4;
     const double SlBufferUsd = 1.5, MinSlUsd = 3.0, MaxSlUsd = 60.0, MinRR = 1.0, TargetOffsetUsd = 0.5;
     const bool UseFibFilter = true;
+    const int TriggerWithinBars = 192;
+    const bool CloseOnTrendFlip = true;
     const double FibMin = 0.60, FibMax = 0.79;
 
     // mirror of the bot's InGoldenPocket: fib band over the CURRENT trend
@@ -104,6 +106,8 @@ internal static class Program
     }
 
     static int _failures;
+    public static List<string> SkipTrace;   // optional gate trace for Replay diagnostics
+    static void Trace(int m, string why) { if (SkipTrace != null) SkipTrace.Add($"{m}|{why}"); }
 
     static void Main(string[] args)
     {
@@ -234,7 +238,12 @@ internal static class Program
             if (h4Map == null || h4Map.State == null) continue;
 
             string trend = h4Map.State.Trend;
-            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); legLastEntry.Clear(); lastTrend = trend; }
+            if (trend != lastTrend)
+            {
+                armed.Clear(); consumed.Clear(); legLastEntry.Clear();
+                if (CloseOnTrendFlip && posOpen && posLong != (trend == "bull")) posOpen = false;
+                lastTrend = trend;
+            }
             bool wantLong = trend == "bull";
 
             // arm / expire zones (mirror of ArmAndExpireZones)
@@ -296,10 +305,11 @@ internal static class Program
 
             var zone = armed.Where(z => z.Bull == wantLong).OrderByDescending(z => z.ArmedAtBar).FirstOrDefault();
             if (zone == null) { triggersNoZone++; continue; }
+            if (m - zone.ArmedAtBar > TriggerWithinBars) { Trace(m, $"stale touch {m - zone.ArmedAtBar} bars"); continue; }
 
             string d1Trend = d1Map != null && d1Map.State != null ? d1Map.State.Trend : null;
             if (RequireDailyAlignment && d1Trend != trend) { alignBlocked++; continue; }
-            if (posOpen) continue;
+            if (posOpen) { Trace(m, "position open"); continue; }
 
             double entry = close;   // proxy for next-bar market fill
             // mirror of the bot's M15Swing SL placement with zone-edge fallback
@@ -311,7 +321,7 @@ internal static class Program
             double slPrice = wantLong ? slAnchor - SlBufferUsd : slAnchor + SlBufferUsd;
             double slUsd = wantLong ? entry - slPrice : slPrice - entry;
             if (slUsd < MinSlUsd) slUsd = MinSlUsd;
-            if (slUsd > MaxSlUsd) continue;
+            if (slUsd > MaxSlUsd) { Trace(m, $"SL {slUsd:F1} > max"); continue; }
 
             var targets = CollectTargets(wantLong, entry, h4Map, h4Candles, d1Map, d1Candles);
             double tpUsd = 0, tpPrice = 0;
@@ -322,7 +332,7 @@ internal static class Program
                 if (reward <= 0) continue;
                 if (reward / slUsd >= MinRR) { tpUsd = reward; tpPrice = tp; break; }
             }
-            if (tpUsd == 0) continue;
+            if (tpUsd == 0) { Trace(m, $"no target >= RR (SL {slUsd:F1})"); continue; }
 
             // ── record + verify invariants ───────────────────────────────
             var e2 = new Entry

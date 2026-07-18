@@ -80,6 +80,18 @@ namespace cAlgo.Robots
         [Parameter("Zone armed expiry (M15 bars)", Group = "Signal", DefaultValue = 192, MinValue = 4)]
         public int ZoneExpiryBars { get; set; }
 
+        // Optional reaction-speed gate: demand the M15 trigger within N bars
+        // of the armed-area touch. Tested against the reference-chart trades:
+        // their own touch→trigger gaps run 60-165 bars, so the default equals
+        // the expiry (never binds). Tighten only with evidence.
+        [Parameter("Trigger within bars of touch", Group = "Signal", DefaultValue = 192, MinValue = 1)]
+        public int TriggerWithinBars { get; set; }
+
+        // Follow structure in exits: an H4 trend flip against the open
+        // position IS the structural exit.
+        [Parameter("Close position on H4 flip", Group = "Signal", DefaultValue = true)]
+        public bool CloseOnTrendFlip { get; set; }
+
         // Golden pocket: a zone is only worth trading when it overlaps the
         // [FibMin, FibMax] retracement band of the CURRENT trend leg
         // (protected origin extreme → running extreme since).
@@ -243,6 +255,15 @@ namespace cAlgo.Robots
             {
                 Print("[TREND] H4 → {0} at {1:yyyy-MM-dd HH:mm} (protected={2:F2} next={3:F2})",
                     trend, Bars.OpenTimes[last], _h4Map.State.ProtectedPrice ?? 0, _h4Map.State.NextPrice ?? 0);
+                if (CloseOnTrendFlip)
+                {
+                    var openPos = Positions.Find(Label, SymbolName);
+                    if (openPos != null && (openPos.TradeType == TradeType.Buy) != (trend == "bull"))
+                    {
+                        ClosePosition(openPos);
+                        Print("[EXIT] H4 flipped to {0} — closed {1} at structure (net {2:F2})", trend, openPos.TradeType, openPos.NetProfit);
+                    }
+                }
                 _armed.Clear();
                 _consumedZones.Clear();
                 _fibRejected.Clear();
@@ -271,6 +292,11 @@ namespace cAlgo.Robots
             if (trig == null) return;
 
             var zone = _armed.Where(z => z.Bull == wantLong).OrderByDescending(z => z.ArmedAtBar).FirstOrDefault();
+            if (zone != null && last - zone.ArmedAtBar > TriggerWithinBars)
+            {
+                LogSkip(last, string.Format("touch is stale ({0} bars ago > {1}) — price left the structure", last - zone.ArmedAtBar, TriggerWithinBars));
+                return;
+            }
             if (zone == null)
             {
                 if (DebugDiagnostics)

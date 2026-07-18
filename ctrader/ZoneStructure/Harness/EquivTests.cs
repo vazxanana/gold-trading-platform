@@ -202,7 +202,12 @@ internal static class EquivTests
             if (h4Eng.Bars.Count <= 3 * 2 + 5 || h4Eng.Trend == null) continue;
 
             string trend = h4Eng.Trend;
-            if (trend != lastTrend) { armed.Clear(); consumed.Clear(); legLastEntry.Clear(); lastTrend = trend; }
+            if (trend != lastTrend)
+            {
+                armed.Clear(); consumed.Clear(); legLastEntry.Clear();
+                if (posOpen && posLong != (trend == "bull")) posOpen = false;
+                lastTrend = trend;
+            }
             bool wantLong = trend == "bull";
 
             double hi = cur.H, lo = cur.L, close = cur.C;
@@ -251,6 +256,7 @@ internal static class EquivTests
             if (trig == null) continue;
             if (!armed.Any(z => z.Bull == wantLong)) continue;
             var zone = armed.Where(z => z.Bull == wantLong).OrderByDescending(z => z.ArmedAtBar).First();
+            if (m - zone.ArmedAtBar > 192) continue;
             if (posOpen) continue;
 
             double entry = close;
