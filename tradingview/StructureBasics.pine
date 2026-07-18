@@ -103,12 +103,15 @@ var bObBot = array.new<float>()
 var bObT = array.new<float>()
 var bObState = array.new<int>()
 
+aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
+bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
+
 if barstate.isconfirmed
     aName = f_tfName(tfA)
     bName = f_tfName(tfB)
 
     // ════════════════════════════ LAYER A ══════════════════════════════════
-    if not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
+    if aOn and not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
         aLastPlT := aPT
         array.push(aP, aPl)
         array.push(aFar, aBodyHi)
@@ -117,7 +120,7 @@ if barstate.isconfirmed
         array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.small))
         array.push(aBox, box(na))
-    if not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
+    if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
         array.push(aFar, aBodyLo)
@@ -148,7 +151,7 @@ if barstate.isconfirmed
                 ln = array.get(aLine, i)
                 closeThrough = isLow ? nz(aClose, p + 1) < p : nz(aClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
-                if closeThrough
+                if closeThrough or wickThrough
                     // structure break → mark the order block that fed the move
                     obTop = isLow ? aLgHi : aLrHi
                     obBot = isLow ? aLgLo : aLrLo
@@ -161,13 +164,11 @@ if barstate.isconfirmed
                         array.push(aObBot, obBot)
                         array.push(aObT, obT)
                         array.push(aObState, 0)
-                    if flipA
+                    if closeThrough and flipA
                         array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = COL_FLIPTXT, text_size = size.normal))
                         array.set(aState, i, 1)
                     else
                         array.set(aState, i, 2)
-                else if wickThrough
-                    array.set(aState, i, 2)
                 else
                     line.set_x2(ln, time)
                     label.set_x(array.get(aLbl, i), math.round(math.avg(line.get_x1(ln), time)))
@@ -195,7 +196,7 @@ if barstate.isconfirmed
         array.remove(aObState, 0)
 
     // ════════════════════════════ LAYER B ══════════════════════════════════
-    if not na(bPl) and (na(bLastPlT) or bPT != bLastPlT)
+    if bOn and not na(bPl) and (na(bLastPlT) or bPT != bLastPlT)
         bLastPlT := bPT
         array.push(bP, bPl)
         array.push(bFar, bBodyHi)
@@ -204,7 +205,7 @@ if barstate.isconfirmed
         array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = COL_TXT, size = size.normal))
         array.push(bBox, box(na))
-    if not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
+    if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
         array.push(bFar, bBodyLo)
@@ -235,7 +236,7 @@ if barstate.isconfirmed
                 ln = array.get(bLine, i)
                 closeThrough = isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
-                if closeThrough
+                if closeThrough or wickThrough
                     obTop = isLow ? bLgHi : bLrHi
                     obBot = isLow ? bLgLo : bLrLo
                     obT = isLow ? bLgT : bLrT
@@ -247,13 +248,11 @@ if barstate.isconfirmed
                         array.push(bObBot, obBot)
                         array.push(bObT, obT)
                         array.push(bObState, 0)
-                    if flipB
+                    if closeThrough and flipB
                         array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = COL_FLIPTXT, text_size = size.normal))
                         array.set(bState, i, 1)
                     else
                         array.set(bState, i, 2)
-                else if wickThrough
-                    array.set(bState, i, 2)
                 else
                     line.set_x2(ln, time)
                     label.set_x(array.get(bLbl, i), math.round(math.avg(line.get_x1(ln), time)))
