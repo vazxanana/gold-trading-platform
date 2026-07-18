@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.11 ─────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.12 ─────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -36,6 +36,10 @@
 //     with a dotted target line at the nearest H4 swing high (buys) or H4
 //     swing low (sells), plus alertconditions. One signal per OB visit;
 //     a chart close through the far side of the box disarms it.
+//   • H4 trend filter: trades must follow H4 structure. The trend is the
+//     direction of the last H4 BOS (a close through a swing high = up, a
+//     close through a swing low = down); BUYs fire only in an up H4 trend,
+//     SELLs only in a down one. A badge in the corner shows the live trend.
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
@@ -47,6 +51,7 @@ obA   = input.bool(true, "Order blocks for A")
 obB   = input.bool(true, "Order blocks for B")
 obBosOnly = input.bool(true, "Order blocks on BOS only (skip sweeps)")
 showSig = input.bool(true, "BUY/SELL signals (OB touch + M5 ChoCh)")
+trendFilter = input.bool(true, "Signals only with the H4 trend")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(12, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
@@ -103,6 +108,7 @@ var aPendTop = array.new<float>()  // only if the sweep upgrades to BOS
 var aPendBot = array.new<float>()
 var float aLastPlT = na
 var float aLastPhT = na
+var int aTrend = 0                 // H4 structure trend: 1 up, -1 down (last BOS direction)
 var aObBox = array.new<box>()
 var aObBull = array.new<bool>()
 var aObTop = array.new<float>()
@@ -313,6 +319,7 @@ if barstate.isconfirmed
                     line.set_x2(ln, time)
                     if closeThrough
                         // layer candle CLOSED through → BOS
+                        aTrend := isLow ? -1 : 1
                         array.set(aMark, i, label.new(time, p, aName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
                         if flipA
                             array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -336,6 +343,7 @@ if barstate.isconfirmed
                 // sweep upgrades to a BOS
                 ct3 = isLow ? nz(aClose, p + 1) < p : nz(aClose, p - 1) > p
                 if ct3
+                    aTrend := isLow ? -1 : 1
                     label.set_text(array.get(aMark, i), aName + " BOS")
                     label.set_textcolor(array.get(aMark, i), colBosTxt)
                     pT3 = array.get(aPendT, i)
@@ -381,11 +389,11 @@ if barstate.isconfirmed
                 inval = sBull ? close < array.get(aObBot, i) : close > array.get(aObTop, i)
                 if inval
                     array.set(aObArmed, i, false)
-                else if sBull and chUp
+                else if sBull and chUp and (not trendFilter or aTrend == 1)
                     f_fireSig(true)
                     buySig := true
                     array.set(aObArmed, i, false)
-                else if not sBull and chDn
+                else if not sBull and chDn and (not trendFilter or aTrend == -1)
                     f_fireSig(false)
                     sellSig := true
                     array.set(aObArmed, i, false)
@@ -539,11 +547,11 @@ if barstate.isconfirmed
                 inval = sBull ? close < array.get(bObBot, i) : close > array.get(bObTop, i)
                 if inval
                     array.set(bObArmed, i, false)
-                else if sBull and chUp
+                else if sBull and chUp and (not trendFilter or aTrend == 1)
                     f_fireSig(true)
                     buySig := true
                     array.set(bObArmed, i, false)
-                else if not sBull and chDn
+                else if not sBull and chDn and (not trendFilter or aTrend == -1)
                     f_fireSig(false)
                     sellSig := true
                     array.set(bObArmed, i, false)
@@ -576,3 +584,8 @@ if barstate.isconfirmed
 
 alertcondition(buySig, "StructBasics BUY", "H1 OB touched + M5 ChoCh up — buy toward the H4 high")
 alertcondition(sellSig, "StructBasics SELL", "H1 OB touched + M5 ChoCh down — sell toward the H4 low")
+
+// live H4 trend badge
+var table trendTbl = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.cell(trendTbl, 0, 0, "H4 " + (aTrend == 1 ? "▲ UP" : aTrend == -1 ? "▼ DOWN" : "—"), text_color = aTrend == 1 ? COL_UP : aTrend == -1 ? COL_DN : color.gray, text_size = size.small, bgcolor = color.new(color.black, 40))
