@@ -27,7 +27,7 @@ useD1      = input.bool(false, "Require D1 trend alignment")
 expiryBars = input.int(192, "Zone armed expiry (chart bars)", minval = 4)
 tfZone     = input.timeframe("240", "Zone/trend timeframe")
 tfTgt      = input.timeframe("D", "Extra target timeframe")
-tfLines    = input.timeframe("", "Break-of-structure lines timeframe (blank = chart)")
+tfLines    = input.timeframe("240", "Break-of-structure lines timeframe (blank = chart)")
 slBuf      = input.float(1.5, "SL buffer beyond structure (USD)", step = 0.1)
 minSl      = input.float(3.0, "Min SL (USD)", step = 0.5)
 maxSl      = input.float(60.0, "Max SL (USD)", step = 1.0)
@@ -850,9 +850,10 @@ if showDiag and barstate.isconfirmed and nz(lnC) > 0 and not na(lnT1)
     if na(lastLineTb) or lnTb != lastLineTb
         lastLineTb := lnTb
         lcol = nz(lnU) == 1 ? COL_DEMAND : COL_SUPPLY
-        line.new(math.round(lnT1), lnP, math.round(lnTb), lnP, xloc = xloc.bar_time, color = color.new(lcol, 25), width = 1)
+        isHtf = tfLines != "" and tfLines != timeframe.period
+        line.new(math.round(lnT1), lnP, math.round(lnTb), lnP, xloc = xloc.bar_time, color = color.new(lcol, isHtf ? 15 : 25), width = isHtf ? 2 : 1)
         if nz(lnC) == 1
-            label.new(math.round(math.avg(lnT1, lnTb)), lnP, "ChoCh", xloc = xloc.bar_time, style = label.style_none, textcolor = color.new(lcol, 10), size = size.tiny)
+            label.new(math.round(math.avg(lnT1, lnTb)), lnP, isHtf ? "ChoCh " + tfLines : "ChoCh", xloc = xloc.bar_time, style = label.style_none, textcolor = color.new(lcol, 10), size = size.small)
 plotshape(sigLong, "Long signal", style = shape.triangleup, location = location.belowbar, color = COL_DEMAND, size = size.small)
 plotshape(sigShort, "Short signal", style = shape.triangledown, location = location.abovebar, color = COL_SUPPLY, size = size.small)
 
