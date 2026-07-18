@@ -1,0 +1,202 @@
+//@version=6
+// ─── STRUCTURE BASICS v0 ────────────────────────────────────────────────────
+// The foundation, rebuilt from zero around exactly three elements of the
+// reference charts — nothing else:
+//
+//   1. Chart-TF structure lines ("H4" on an H4 chart): every confirmed swing
+//      low/high, drawn from the swing until a candle CLOSES through it (the
+//      break) — the stair-step of the trend.
+//   2. Higher-TF level lines ("Daily"): higher-TF swing lows/highs, drawn
+//      from the swing until price trades through them (the sweep) — the
+//      liquidity targets.
+//   3. "S/D Flip" boxes: a higher-TF support that gets CLOSED through does
+//      not die — it flips into supply (and vice versa). The box spans the
+//      broken level to the consolidation bodies that sat on it, extends
+//      right, and only dies when a higher-TF close reclaims it.
+//
+// Add to the H4 chart to see the H4 stair + Daily levels + Daily flip boxes
+// (reference images 1-2); on the Daily chart the same logic gives image 3.
+indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100)
+
+swS      = input.int(3, "Swing strength (bars each side)", minval = 2)
+tfHigher = input.timeframe("D", "Higher timeframe (levels + S/D flips)")
+showHi   = input.bool(true, "Mark chart-TF swing highs too")
+maxKeep  = input.int(8, "Max lines kept per group")
+
+color COL_UP = #4ADE80
+color COL_DN = #FB7185
+color COL_FLIP = color.new(#FB7185, 78)
+color COL_FLIP2 = color.new(#4ADE80, 78)
+color COL_TXT = color.new(color.white, 25)
+
+f_tfName(tf) =>
+    tf == "D" or tf == "1D" ? "Daily" : tf == "W" ? "Weekly" : tf == "240" ? "H4" : tf == "60" ? "H1" : tf == "15" ? "M15" : tf
+
+// ════════════════════════════════════════════════════════════════════════════
+// 1. CHART-TF STRUCTURE LINES — swing → close-through break
+// ════════════════════════════════════════════════════════════════════════════
+var stP = array.new<float>()     // level price
+var stActive = array.new<bool>() // still unbroken
+var stLine = array.new<line>()
+var stLbl = array.new<label>()
+var stIsLow = array.new<bool>()
+
+f_addStruct(price, isLow) =>
+    ln = line.new(bar_index - swS, price, bar_index, price, color = color.new(isLow ? COL_DN : COL_UP, 45), width = 1)
+    lb = label.new(bar_index, price, f_tfName(timeframe.period), style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = COL_TXT, size = size.small)
+    array.push(stP, price)
+    array.push(stActive, true)
+    array.push(stLine, ln)
+    array.push(stLbl, lb)
+    array.push(stIsLow, isLow)
+    if array.size(stP) > 2 * maxKeep
+        line.delete(array.get(stLine, 0))
+        label.delete(array.get(stLbl, 0))
+        array.remove(stP, 0)
+        array.remove(stActive, 0)
+        array.remove(stLine, 0)
+        array.remove(stLbl, 0)
+        array.remove(stIsLow, 0)
+
+pl = ta.pivotlow(low, swS, swS)
+ph = ta.pivothigh(high, swS, swS)
+
+if barstate.isconfirmed
+    if not na(pl)
+        f_addStruct(pl, true)
+    if showHi and not na(ph)
+        f_addStruct(ph, false)
+    if array.size(stP) > 0
+        for i = 0 to array.size(stP) - 1
+            if array.get(stActive, i)
+                p = array.get(stP, i)
+                isLow = array.get(stIsLow, i)
+                broken = isLow ? close < p : close > p
+                line.set_x2(array.get(stLine, i), bar_index)
+                lbx = array.get(stLbl, i)
+                label.set_x(lbx, (line.get_x1(array.get(stLine, i)) + bar_index) / 2)
+                if broken
+                    array.set(stActive, i, false)
+
+// ════════════════════════════════════════════════════════════════════════════
+// 2 + 3. HIGHER-TF LEVELS AND S/D FLIP BOXES
+// ════════════════════════════════════════════════════════════════════════════
+// confirmed higher-TF pivots with their bar times and the consolidation
+// body extremes around the pivot (the flip box's far edge)
+f_htf() =>
+    hpl = ta.pivotlow(low, swS, swS)
+    hph = ta.pivothigh(high, swS, swS)
+    pT = time[swS]
+    bodyHi = ta.highest(math.max(open, close), swS * 2 + 1)
+    bodyLo = ta.lowest(math.min(open, close), swS * 2 + 1)
+    [hpl[1], hph[1], pT[1], bodyHi[1], bodyLo[1], close[1]]
+
+[dPl, dPh, dPT, dBodyHi, dBodyLo, dClose] = request.security(syminfo.tickerid, tfHigher, f_htf(), lookahead = barmerge.lookahead_on)
+
+// supports (higher-TF swing lows): line until swept; on higher-TF close
+// below → S/D flip box (support becomes supply)
+var supP = array.new<float>()
+var supTop = array.new<float>()   // consolidation body top at formation
+var supState = array.new<int>()   // 0 line, 1 flipped box, 2 done
+var supLine = array.new<line>()
+var supLbl = array.new<label>()
+var supBox = array.new<box>()
+var float lastPlT = na
+
+// resistances (higher-TF swing highs) mirrored
+var resP = array.new<float>()
+var resBot = array.new<float>()
+var resState = array.new<int>()
+var resLine = array.new<line>()
+var resLbl = array.new<label>()
+var resBox = array.new<box>()
+var float lastPhT = na
+
+htfName = f_tfName(tfHigher)
+
+if barstate.isconfirmed
+    // new higher-TF swing low
+    if not na(dPl) and (na(lastPlT) or dPT != lastPlT)
+        lastPlT := dPT
+        lnS = line.new(math.round(dPT), dPl, time, dPl, xloc = xloc.bar_time, color = color.new(color.silver, 30), width = 2)
+        lbS = label.new(time, dPl, htfName, xloc = xloc.bar_time, style = label.style_label_up, color = color.new(color.black, 100), textcolor = COL_TXT, size = size.small)
+        array.push(supP, dPl)
+        array.push(supTop, dBodyHi)
+        array.push(supState, 0)
+        array.push(supLine, lnS)
+        array.push(supLbl, lbS)
+        array.push(supBox, box(na))
+        if array.size(supP) > maxKeep
+            line.delete(array.get(supLine, 0))
+            label.delete(array.get(supLbl, 0))
+            if not na(array.get(supBox, 0))
+                box.delete(array.get(supBox, 0))
+            array.remove(supP, 0)
+            array.remove(supTop, 0)
+            array.remove(supState, 0)
+            array.remove(supLine, 0)
+            array.remove(supLbl, 0)
+            array.remove(supBox, 0)
+    // new higher-TF swing high
+    if not na(dPh) and (na(lastPhT) or dPT != lastPhT)
+        lastPhT := dPT
+        lnR = line.new(math.round(dPT), dPh, time, dPh, xloc = xloc.bar_time, color = color.new(color.silver, 30), width = 2)
+        lbR = label.new(time, dPh, htfName, xloc = xloc.bar_time, style = label.style_label_down, color = color.new(color.black, 100), textcolor = COL_TXT, size = size.small)
+        array.push(resP, dPh)
+        array.push(resBot, dBodyLo)
+        array.push(resState, 0)
+        array.push(resLine, lnR)
+        array.push(resLbl, lbR)
+        array.push(resBox, box(na))
+        if array.size(resP) > maxKeep
+            line.delete(array.get(resLine, 0))
+            label.delete(array.get(resLbl, 0))
+            if not na(array.get(resBox, 0))
+                box.delete(array.get(resBox, 0))
+            array.remove(resP, 0)
+            array.remove(resBot, 0)
+            array.remove(resState, 0)
+            array.remove(resLine, 0)
+            array.remove(resLbl, 0)
+            array.remove(resBox, 0)
+
+    // lifecycle: supports
+    if array.size(supP) > 0
+        for i = 0 to array.size(supP) - 1
+            st = array.get(supState, i)
+            p = array.get(supP, i)
+            if st == 0
+                if low > p
+                    line.set_x2(array.get(supLine, i), time)
+                    label.set_x(array.get(supLbl, i), time)
+                if nz(dClose, p + 1) < p
+                    // support CLOSED through on the higher TF → S/D flip
+                    bx = box.new(line.get_x1(array.get(supLine, i)), array.get(supTop, i), time, p, xloc = xloc.bar_time, bgcolor = COL_FLIP, border_color = color.new(COL_DN, 55), text = htfName + " S/D Flip", text_color = color.new(#C084FC, 20), text_size = size.normal)
+                    array.set(supBox, i, bx)
+                    array.set(supState, i, 1)
+                else if low < p
+                    array.set(supState, i, 2)   // swept by wick only: line ends here
+            else if st == 1
+                box.set_right(array.get(supBox, i), time)
+                if nz(dClose, p) > array.get(supTop, i)
+                    array.set(supState, i, 2)   // reclaimed → flip dead
+
+    // lifecycle: resistances (mirror)
+    if array.size(resP) > 0
+        for i = 0 to array.size(resP) - 1
+            st = array.get(resState, i)
+            p = array.get(resP, i)
+            if st == 0
+                if high < p
+                    line.set_x2(array.get(resLine, i), time)
+                    label.set_x(array.get(resLbl, i), time)
+                if nz(dClose, p - 1) > p
+                    bx = box.new(line.get_x1(array.get(resLine, i)), p, time, array.get(resBot, i), xloc = xloc.bar_time, bgcolor = COL_FLIP2, border_color = color.new(COL_UP, 55), text = htfName + " S/D Flip", text_color = color.new(#C084FC, 20), text_size = size.normal)
+                    array.set(resBox, i, bx)
+                    array.set(resState, i, 1)
+                else if high > p
+                    array.set(resState, i, 2)
+            else if st == 1
+                box.set_right(array.get(resBox, i), time)
+                if nz(dClose, p) < array.get(resBot, i)
+                    array.set(resState, i, 2)
