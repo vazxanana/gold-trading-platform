@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.7 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.8 ──────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -16,7 +16,9 @@
 //     close, which arrives hours later and would grab post-break candles).
 //     Bullish OB = last red candle before an upside break, box from its wick
 //     low to its body top; bearish OB mirrored. One box per BOS, captioned
-//     with the chart timeframe, kept until a chart close mitigates it.
+//     with the chart timeframe. The box extends right until price first trades
+//     BACK INTO it (mitigation) — there it freezes and stays on the chart,
+//     dimmed. "Unmitigated only" hides the frozen ones.
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
@@ -27,7 +29,7 @@ flipB = input.bool(true, "S/D flip boxes for B")
 obA   = input.bool(true, "Order blocks for A")
 obB   = input.bool(true, "Order blocks for B")
 maxKeep = input.int(8, "Max levels kept per layer")
-maxObs  = input.int(6, "Max order blocks kept per layer")
+maxObs  = input.int(12, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
 
 colLvlTxt    = input.color(color.white, "Caption — levels (H4/Daily)", group = "Caption colors")
@@ -69,7 +71,8 @@ var aObBull = array.new<bool>()
 var aObTop = array.new<float>()
 var aObBot = array.new<float>()
 var aObT = array.new<float>()
-var aObState = array.new<int>()    // 0 live, 1 mitigated
+var aObMade = array.new<float>()   // time of the crossing bar that created it
+var aObState = array.new<int>()    // 0 live, 1 mitigated (frozen)
 
 // ── layer B state ───────────────────────────────────────────────────────────
 var bP = array.new<float>()
@@ -86,6 +89,7 @@ var bObBull = array.new<bool>()
 var bObTop = array.new<float>()
 var bObBot = array.new<float>()
 var bObT = array.new<float>()
+var bObMade = array.new<float>()
 var bObState = array.new<int>()
 
 aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
@@ -160,6 +164,7 @@ if barstate.isconfirmed
                         array.push(aObTop, obTop)
                         array.push(aObBot, obBot)
                         array.push(aObT, obT)
+                        array.push(aObMade, time)
                         array.push(aObState, 0)
                     if closeThrough and flipA
                         array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -175,16 +180,22 @@ if barstate.isconfirmed
                 if reclaimed
                     array.set(aState, i, 2)
 
-    // layer A order-block lifecycle (chart-close mitigation)
+    // layer A order-block lifecycle: extend right until price trades back
+    // INTO the box (mitigation touch), then freeze there — mitigated boxes
+    // stay on the chart, dimmed
     if array.size(aObBox) > 0
         for i = 0 to array.size(aObBox) - 1
             if array.get(aObState, i) == 0
                 box.set_right(array.get(aObBox, i), time)
-                dead = array.get(aObBull, i) ? close < array.get(aObBot, i) : close > array.get(aObTop, i)
-                if dead
+                mit = time > array.get(aObMade, i) and (array.get(aObBull, i) ? low <= array.get(aObTop, i) : high >= array.get(aObBot, i))
+                if mit
+                    array.set(aObState, i, 1)
                     if unmitOnly
                         box.delete(array.get(aObBox, i))
-                    array.set(aObState, i, 1)
+                    else
+                        cM = array.get(aObBull, i) ? COL_UP : COL_DN
+                        box.set_bgcolor(array.get(aObBox, i), color.new(cM, 92))
+                        box.set_border_color(array.get(aObBox, i), color.new(cM, 75))
     while array.size(aObBox) > maxObs
         box.delete(array.get(aObBox, 0))
         array.remove(aObBox, 0)
@@ -192,6 +203,7 @@ if barstate.isconfirmed
         array.remove(aObTop, 0)
         array.remove(aObBot, 0)
         array.remove(aObT, 0)
+        array.remove(aObMade, 0)
         array.remove(aObState, 0)
 
     // ════════════════════════════ LAYER B ══════════════════════════════════
@@ -247,6 +259,7 @@ if barstate.isconfirmed
                         array.push(bObTop, obTop)
                         array.push(bObBot, obBot)
                         array.push(bObT, obT)
+                        array.push(bObMade, time)
                         array.push(bObState, 0)
                     if closeThrough and flipB
                         array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -262,16 +275,20 @@ if barstate.isconfirmed
                 if reclaimed
                     array.set(bState, i, 2)
 
-    // layer B order-block lifecycle
+    // layer B order-block lifecycle: freeze at the mitigation touch, keep dimmed
     if array.size(bObBox) > 0
         for i = 0 to array.size(bObBox) - 1
             if array.get(bObState, i) == 0
                 box.set_right(array.get(bObBox, i), time)
-                dead = array.get(bObBull, i) ? close < array.get(bObBot, i) : close > array.get(bObTop, i)
-                if dead
+                mit = time > array.get(bObMade, i) and (array.get(bObBull, i) ? low <= array.get(bObTop, i) : high >= array.get(bObBot, i))
+                if mit
+                    array.set(bObState, i, 1)
                     if unmitOnly
                         box.delete(array.get(bObBox, i))
-                    array.set(bObState, i, 1)
+                    else
+                        cM = array.get(bObBull, i) ? COL_UP : COL_DN
+                        box.set_bgcolor(array.get(bObBox, i), color.new(cM, 92))
+                        box.set_border_color(array.get(bObBox, i), color.new(cM, 75))
     while array.size(bObBox) > maxObs
         box.delete(array.get(bObBox, 0))
         array.remove(bObBox, 0)
@@ -279,6 +296,7 @@ if barstate.isconfirmed
         array.remove(bObTop, 0)
         array.remove(bObBot, 0)
         array.remove(bObT, 0)
+        array.remove(bObMade, 0)
         array.remove(bObState, 0)
 
     // refresh the opposite-candle memory LAST, so every lookup above sees
