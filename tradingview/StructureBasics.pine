@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v0.5 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v0.7 ──────────────────────────────────────────────────
 // The foundation, rebuilt from zero around exactly the elements of the
 // reference charts — nothing else:
 //
@@ -11,12 +11,12 @@
 //     timeframe CLOSES through does not die — it flips into supply (and
 //     mirror). Box spans the broken level to the consolidation bodies that
 //     sat on it, extends right, dies when a layer close reclaims it.
-//   • Order blocks at the LEG ORIGIN: when a layer level breaks, the box
-//     marks the pullback extreme that launched the breaking leg — for an
-//     upside break, the lowest chart candle between the level forming and
-//     the break (wick low → body top); mirror for downside. One box per
-//     leg even when the leg breaks several levels, captioned with the
-//     chart timeframe, kept until a chart close mitigates it.
+//   • Order blocks: the LAST opposite chart candle BEFORE the BOS — captured
+//     at the exact first chart bar that crosses the level (not at the layer
+//     close, which arrives hours later and would grab post-break candles).
+//     Bullish OB = last red candle before an upside break, box from its wick
+//     low to its body top; bearish OB mirrored. One box per BOS, captioned
+//     with the chart timeframe, kept until a chart close mitigates it.
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
@@ -62,9 +62,6 @@ var aState = array.new<int>()      // 0 live line, 1 flipped box, 2 done
 var aLine = array.new<line>()
 var aLbl = array.new<label>()
 var aBox = array.new<box>()
-var aOrgT = array.new<float>()     // leg-origin tracking while the level lives:
-var aOrgExt = array.new<float>()   //   high-level → lowest low since creation
-var aOrgBody = array.new<float>()  //   low-level  → highest high since creation
 var float aLastPlT = na
 var float aLastPhT = na
 var aObBox = array.new<box>()
@@ -82,9 +79,6 @@ var bState = array.new<int>()
 var bLine = array.new<line>()
 var bLbl = array.new<label>()
 var bBox = array.new<box>()
-var bOrgT = array.new<float>()
-var bOrgExt = array.new<float>()
-var bOrgBody = array.new<float>()
 var float bLastPlT = na
 var float bLastPhT = na
 var bObBox = array.new<box>()
@@ -98,11 +92,13 @@ aOn = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
 bOn = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
 obName = f_tfName(timeframe.period)
 
-// most recent bearish / bullish candle BEFORE the current bar — the OB
-// candle when the leg origin lands on an opposite-colored reversal bar
-var float lastRedTop = na
+// the most recent bearish / bullish chart candle strictly BEFORE the current
+// bar — the "last OB before the BOS" when a level gets crossed on this bar
+var float lastRedTop = na          // body top of the last red candle
+var float lastRedLo = na           // its wick low
 var float lastRedT = na
-var float lastGrnBot = na
+var float lastGrnBot = na          // body bottom of the last green candle
+var float lastGrnHi = na           // its wick high
 var float lastGrnT = na
 
 if barstate.isconfirmed
@@ -119,9 +115,6 @@ if barstate.isconfirmed
         array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
-        array.push(aOrgT, close > open ? time : nz(lastGrnT, time))
-        array.push(aOrgExt, high)              // low-level: track highest high
-        array.push(aOrgBody, math.min(open, close))
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
@@ -131,9 +124,6 @@ if barstate.isconfirmed
         array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(aBox, box(na))
-        array.push(aOrgT, close < open ? time : nz(lastRedT, time))
-        array.push(aOrgExt, low)               // high-level: track lowest low
-        array.push(aOrgBody, math.max(open, close))
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
         label.delete(array.get(aLbl, 0))
@@ -146,9 +136,6 @@ if barstate.isconfirmed
         array.remove(aLine, 0)
         array.remove(aLbl, 0)
         array.remove(aBox, 0)
-        array.remove(aOrgT, 0)
-        array.remove(aOrgExt, 0)
-        array.remove(aOrgBody, 0)
 
     if array.size(aP) > 0
         for i = 0 to array.size(aP) - 1
@@ -156,28 +143,17 @@ if barstate.isconfirmed
             p = array.get(aP, i)
             isLow = array.get(aIsLow, i)
             if st == 0
-                // leg-origin tracking: the extreme pullback since the level
-                // formed is the origin of whatever leg finally breaks it
-                if isLow
-                    if high > array.get(aOrgExt, i)
-                        array.set(aOrgExt, i, high)
-                        array.set(aOrgBody, i, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
-                        array.set(aOrgT, i, close > open ? time : nz(lastGrnT, time))
-                else
-                    if low < array.get(aOrgExt, i)
-                        array.set(aOrgExt, i, low)
-                        array.set(aOrgBody, i, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
-                        array.set(aOrgT, i, close < open ? time : nz(lastRedT, time))
                 ln = array.get(aLine, i)
                 closeThrough = isLow ? nz(aClose, p + 1) < p : nz(aClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
                 if closeThrough or wickThrough
-                    // level taken → mark the leg-origin order block
-                    obT = array.get(aOrgT, i)
-                    if obA and not array.includes(aObT, obT)
-                        obBull = not isLow
-                        obTop = obBull ? array.get(aOrgBody, i) : array.get(aOrgExt, i)
-                        obBot = obBull ? array.get(aOrgExt, i) : array.get(aOrgBody, i)
+                    // level crossed on THIS bar → the OB is the last opposite
+                    // candle strictly before this bar
+                    obBull = not isLow
+                    obT = obBull ? lastRedT : lastGrnT
+                    if obA and not na(obT) and not array.includes(aObT, obT)
+                        obTop = obBull ? lastRedTop : lastGrnHi
+                        obBot = obBull ? lastRedLo : lastGrnBot
                         obCol = obBull ? COL_UP : COL_DN
                         array.push(aObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 80), border_color = color.new(obCol, 50), text = obName + " OB", text_color = obBull ? colObBullTxt : colObBearTxt, text_size = size.small))
                         array.push(aObBull, obBull)
@@ -228,9 +204,6 @@ if barstate.isconfirmed
         array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
-        array.push(bOrgT, close > open ? time : nz(lastGrnT, time))
-        array.push(bOrgExt, high)
-        array.push(bOrgBody, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
     if bOn and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
@@ -240,9 +213,6 @@ if barstate.isconfirmed
         array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
         array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(bBox, box(na))
-        array.push(bOrgT, close < open ? time : nz(lastRedT, time))
-        array.push(bOrgExt, low)
-        array.push(bOrgBody, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
         label.delete(array.get(bLbl, 0))
@@ -255,9 +225,6 @@ if barstate.isconfirmed
         array.remove(bLine, 0)
         array.remove(bLbl, 0)
         array.remove(bBox, 0)
-        array.remove(bOrgT, 0)
-        array.remove(bOrgExt, 0)
-        array.remove(bOrgBody, 0)
 
     if array.size(bP) > 0
         for i = 0 to array.size(bP) - 1
@@ -265,25 +232,15 @@ if barstate.isconfirmed
             p = array.get(bP, i)
             isLow = array.get(bIsLow, i)
             if st == 0
-                if isLow
-                    if high > array.get(bOrgExt, i)
-                        array.set(bOrgExt, i, high)
-                        array.set(bOrgBody, i, close > open ? math.min(open, close) : nz(lastGrnBot, math.min(open, close)))
-                        array.set(bOrgT, i, close > open ? time : nz(lastGrnT, time))
-                else
-                    if low < array.get(bOrgExt, i)
-                        array.set(bOrgExt, i, low)
-                        array.set(bOrgBody, i, close < open ? math.max(open, close) : nz(lastRedTop, math.max(open, close)))
-                        array.set(bOrgT, i, close < open ? time : nz(lastRedT, time))
                 ln = array.get(bLine, i)
                 closeThrough = isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
                 wickThrough = isLow ? low < p : high > p
                 if closeThrough or wickThrough
-                    obT = array.get(bOrgT, i)
-                    if obB and not array.includes(bObT, obT)
-                        obBull = not isLow
-                        obTop = obBull ? array.get(bOrgBody, i) : array.get(bOrgExt, i)
-                        obBot = obBull ? array.get(bOrgExt, i) : array.get(bOrgBody, i)
+                    obBull = not isLow
+                    obT = obBull ? lastRedT : lastGrnT
+                    if obB and not na(obT) and not array.includes(bObT, obT)
+                        obTop = obBull ? lastRedTop : lastGrnHi
+                        obBot = obBull ? lastRedLo : lastGrnBot
                         obCol = obBull ? COL_UP : COL_DN
                         array.push(bObBox, box.new(math.round(obT), obTop, time, obBot, xloc = xloc.bar_time, bgcolor = color.new(obCol, 80), border_color = color.new(obCol, 50), text = obName + " OB", text_color = obBull ? colObBullTxt : colObBearTxt, text_size = size.small))
                         array.push(bObBull, obBull)
@@ -324,11 +281,13 @@ if barstate.isconfirmed
         array.remove(bObT, 0)
         array.remove(bObState, 0)
 
-    // refresh the opposite-candle memory LAST so all lookups above see the
-    // most recent opposite candle strictly before the current bar
+    // refresh the opposite-candle memory LAST, so every lookup above sees
+    // the last opposite candle strictly BEFORE the current (crossing) bar
     if close < open
         lastRedTop := math.max(open, close)
+        lastRedLo := low
         lastRedT := time
     if close > open
         lastGrnBot := math.min(open, close)
+        lastGrnHi := high
         lastGrnT := time
