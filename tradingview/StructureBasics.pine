@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v2.6 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v2.7 ──────────────────────────────────────────────────
 // v0.8 foundation + chart-adaptive structure layers:
 //
 //   • The two structure layers FOLLOW THE CHART TIMEFRAME:
@@ -15,11 +15,13 @@
 //   • Market structure is marked: a zigzag connects the confirmed swings of
 //     each layer. Main timeframe draws as the dark thick line, the second
 //     one grey and thin (both colors configurable).
-//   • Break classification: a BOS needs a CANDLE CLOSURE through the level
-//     (blue "BOS" label at the break bar) — a wick through is only a
-//     liquidity sweep: no text, the level line simply turns into a RED
-//     DASHED line. A swept level later closed through gets its BOS label
-//     then, and S/D flips only ever fire on a true BOS.
+//   • Break classification: a break needs a CANDLE CLOSURE through the
+//     level — a closure WITH the layer's trend is a "BOS", a closure
+//     AGAINST it (first break of the last low in an up-leg / last high in
+//     a down-leg) is a "ChoCh". A wick through is only a liquidity sweep:
+//     no text, the level line simply turns into a RED DASHED line; if it
+//     later gets closed through it earns its BOS/ChoCh label then. S/D
+//     flips only ever fire on a true closure.
 //   • Only the LAST live high and LAST live low of each layer stay marked:
 //     a fresh swing replaces the previous untaken line of its side, so in a
 //     bearish leg only the last high shows, in a bullish leg only the last
@@ -58,6 +60,7 @@ colObBearTxt = input.color(#FB7185, "Caption — bearish OB", group = "Caption c
 colObBullTxt = input.color(#4ADE80, "Caption — bullish OB", group = "Caption colors")
 colFlipTxt   = input.color(#C084FC, "Caption — S/D Flip", group = "Caption colors")
 colBosTxt    = input.color(#60A5FA, "Caption — BOS", group = "Caption colors")
+colChoTxt    = input.color(#F97316, "Caption — ChoCh", group = "Caption colors")
 colSweep     = input.color(color.red, "Swept level — dashed line", group = "Structure colors")
 
 color COL_UP = #4ADE80
@@ -136,6 +139,10 @@ var loBufO = array.new<float>()
 var loBufH = array.new<float>()
 var loBufL = array.new<float>()
 var loBufC = array.new<float>()
+
+// per-layer trend from the last closure break: 1 up, -1 down
+var int aDirT = 0
+var int bDirT = 0
 
 // market-structure zigzag state per layer: [unused, unused, lastSwingT, lastSwingP]
 var aSw = array.new<float>(4, na)
@@ -327,8 +334,10 @@ if barstate.isconfirmed
                         array.push(aObState, 0)
                     line.set_x2(ln, time)
                     if closeThrough
-                        // candle CLOSED through → BOS
-                        array.set(aMark, i, label.new(time, p, aName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        // closure WITH trend = BOS, AGAINST trend = ChoCh
+                        isCho = isLow ? aDirT == 1 : aDirT == -1
+                        aDirT := isLow ? -1 : 1
+                        array.set(aMark, i, label.new(time, p, aName + (isCho ? " ChoCh" : " BOS"), xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = isCho ? colChoTxt : colBosTxt, size = size.small))
                         if flipA
                             array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
                             array.set(aState, i, 1)
@@ -353,7 +362,9 @@ if barstate.isconfirmed
                 // the sweep to a BOS
                 ct3 = isLow ? nz(aCloseEff, p + 1) < p : nz(aCloseEff, p - 1) > p
                 if ct3
-                    array.set(aMark, i, label.new(time, p, aName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                    isCho = isLow ? aDirT == 1 : aDirT == -1
+                    aDirT := isLow ? -1 : 1
+                    array.set(aMark, i, label.new(time, p, aName + (isCho ? " ChoCh" : " BOS"), xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = isCho ? colChoTxt : colBosTxt, size = size.small))
                     if flipA
                         ln3 = array.get(aLine, i)
                         array.set(aBox, i, box.new(line.get_x1(ln3), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -473,7 +484,9 @@ if barstate.isconfirmed
                         array.push(bObState, 0)
                     line.set_x2(ln, brkT)
                     if closeThrough
-                        array.set(bMark, i, label.new(brkT, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        isCho = isLow ? bDirT == 1 : bDirT == -1
+                        bDirT := isLow ? -1 : 1
+                        array.set(bMark, i, label.new(brkT, p, bName + (isCho ? " ChoCh" : " BOS"), xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = isCho ? colChoTxt : colBosTxt, size = size.small))
                         if flipB
                             array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
                             array.set(bState, i, 1)
@@ -502,7 +515,9 @@ if barstate.isconfirmed
                     if isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
                         tC3 := time
                 if not na(tC3)
-                    array.set(bMark, i, label.new(math.round(tC3), p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                    isCho = isLow ? bDirT == 1 : bDirT == -1
+                    bDirT := isLow ? -1 : 1
+                    array.set(bMark, i, label.new(math.round(tC3), p, bName + (isCho ? " ChoCh" : " BOS"), xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = isCho ? colChoTxt : colBosTxt, size = size.small))
                     if flipB
                         ln3 = array.get(bLine, i)
                         array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
