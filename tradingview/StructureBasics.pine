@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v2.4 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v2.5 ──────────────────────────────────────────────────
 // v0.8 foundation + chart-adaptive structure layers:
 //
 //   • The two structure layers FOLLOW THE CHART TIMEFRAME:
@@ -179,9 +179,11 @@ if barstate.isconfirmed
     // and track the bar's extreme closes for close-through checks
     float cMin = na
     float cMax = na
+    int loStart = -1
     if bIsLo
         nLo = array.size(loT)
         if nLo > 0
+            loStart := array.size(loBufT)
             for k = 0 to nLo - 1
                 array.push(loBufT, array.get(loT, k))
                 array.push(loBufO, array.get(loO, k))
@@ -231,12 +233,6 @@ if barstate.isconfirmed
                         array.push(bMark, label(na))
                         array.push(bBox, box(na))
                         f_swing(bSw, bZz, pt, array.get(loBufH, ctr), colStructB, 1)
-            while array.size(loBufT) > 400
-                array.remove(loBufT, 0)
-                array.remove(loBufO, 0)
-                array.remove(loBufH, 0)
-                array.remove(loBufL, 0)
-                array.remove(loBufC, 0)
 
     // ════════════════════════════ LAYER A ══════════════════════════════════
     if aOn and not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
@@ -245,22 +241,22 @@ if barstate.isconfirmed
         array.push(aFar, aBodyHi)
         array.push(aIsLow, true)
         array.push(aState, 0)
-        array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
+        array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 1))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(aMark, label(na))
         array.push(aBox, box(na))
-        f_swing(aSw, aZz, aPT, aPl, colStructA, 2)
+        f_swing(aSw, aZz, aPT, aPl, colStructA, 1)
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
         array.push(aFar, aBodyLo)
         array.push(aIsLow, false)
         array.push(aState, 0)
-        array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
+        array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 1))
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(aMark, label(na))
         array.push(aBox, box(na))
-        f_swing(aSw, aZz, aPT, aPh, colStructA, 2)
+        f_swing(aSw, aZz, aPT, aPh, colStructA, 1)
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
         label.delete(array.get(aLbl, 0))
@@ -412,11 +408,26 @@ if barstate.isconfirmed
             isLow = array.get(bIsLow, i)
             if st == 0
                 ln = array.get(bLine, i)
-                // close-through: below the chart TF the strictest close of
-                // this bar's layer-B candles decides; otherwise the layer
-                // security close
-                closeThrough = bIsLo ? (isLow ? nz(cMin, p + 1) < p : nz(cMax, p - 1) > p) : (isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p)
-                wickThrough = isLow ? low < p : high > p
+                // exact break point: on the intrabar feed, find the FIRST
+                // layer-B candle that closed / wicked through the level so
+                // the line end and BOS label land on the right candle
+                float tC = na
+                float tW = na
+                if bIsLo
+                    if loStart >= 0 and array.size(loBufT) > loStart
+                        for k2 = loStart to array.size(loBufT) - 1
+                            if na(tC) and (isLow ? array.get(loBufC, k2) < p : array.get(loBufC, k2) > p)
+                                tC := array.get(loBufT, k2)
+                            if na(tW) and (isLow ? array.get(loBufL, k2) < p : array.get(loBufH, k2) > p)
+                                tW := array.get(loBufT, k2)
+                else
+                    if isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
+                        tC := time
+                    if isLow ? low < p : high > p
+                        tW := time
+                closeThrough = not na(tC)
+                wickThrough = not na(tW)
+                brkT = closeThrough or wickThrough ? math.round(closeThrough ? tC : tW) : int(na)
                 if closeThrough or wickThrough
                     obBull = not isLow
                     obT = obBull ? lastRedT : lastGrnT
@@ -431,17 +442,17 @@ if barstate.isconfirmed
                         array.push(bObT, obT)
                         array.push(bObMade, time)
                         array.push(bObState, 0)
-                    line.set_x2(ln, time)
+                    line.set_x2(ln, brkT)
                     if closeThrough
-                        array.set(bMark, i, label.new(time, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        array.set(bMark, i, label.new(brkT, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
                         if flipB
                             array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
                             array.set(bState, i, 1)
                         else
                             array.set(bState, i, 2)
                     else
-                        line.set_style(ln, line.style_dashed)
-                        line.set_color(ln, colSweep)
+                        // sweep on the second layer: the line just ends — the
+                        // red-dash sweep marking is for the chart's own TF only
                         array.set(bState, i, 3)
                 else
                     line.set_x2(ln, time)
@@ -452,9 +463,17 @@ if barstate.isconfirmed
                 if reclaimed
                     array.set(bState, i, 2)
             else if st == 3
-                ct3 = bIsLo ? (isLow ? nz(cMin, p + 1) < p : nz(cMax, p - 1) > p) : (isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p)
-                if ct3
-                    array.set(bMark, i, label.new(time, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                float tC3 = na
+                if bIsLo
+                    if loStart >= 0 and array.size(loBufT) > loStart
+                        for k3 = loStart to array.size(loBufT) - 1
+                            if na(tC3) and (isLow ? array.get(loBufC, k3) < p : array.get(loBufC, k3) > p)
+                                tC3 := array.get(loBufT, k3)
+                else
+                    if isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p
+                        tC3 := time
+                if not na(tC3)
+                    array.set(bMark, i, label.new(math.round(tC3), p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
                     if flipB
                         ln3 = array.get(bLine, i)
                         array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
@@ -485,6 +504,15 @@ if barstate.isconfirmed
         array.remove(bObT, 0)
         array.remove(bObMade, 0)
         array.remove(bObState, 0)
+
+    // prune the layer-B candle buffer LAST (the level machine indexes into
+    // this bar's slice, so no removals may happen before it runs)
+    while array.size(loBufT) > 400
+        array.remove(loBufT, 0)
+        array.remove(loBufO, 0)
+        array.remove(loBufH, 0)
+        array.remove(loBufL, 0)
+        array.remove(loBufC, 0)
 
     // refresh the opposite-candle memory LAST, so every lookup above sees
     // the last opposite candle strictly BEFORE the current (crossing) bar
