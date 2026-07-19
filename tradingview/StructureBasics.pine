@@ -1,14 +1,18 @@
 //@version=6
-// ─── STRUCTURE BASICS v2.1 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v2.2 ──────────────────────────────────────────────────
 // v0.8 foundation + chart-adaptive structure layers:
 //
 //   • The two structure layers FOLLOW THE CHART TIMEFRAME:
 //         Daily chart → Daily + H4 structure
 //         H4 chart    → H4 + H1 structure
 //         H1 chart    → H1 + M15 structure  (and below)
-//     Layer A is the chart's own structure (major, white), layer B the one
-//     below it (minor, silver). Auto mode can be turned off to pick both
+//     Layer A is the chart's own structure (major, DARK), layer B the one
+//     below it (minor, GREY). Auto mode can be turned off to pick both
 //     timeframes manually.
+//   • Market structure is marked and identified: a zigzag connects the
+//     confirmed swings of each layer, and every swing is labeled HH / HL /
+//     LH / LL. Main timeframe draws as the dark thick line, the second one
+//     grey and thin (both colors configurable).
 //   • Every confirmed swing low/high of each layer gets a level line
 //     captioned with its timeframe name, drawn from the swing until price
 //     trades through it.
@@ -36,6 +40,9 @@ obB   = input.bool(true, "Order blocks for B")
 maxKeep = input.int(8, "Max levels kept per layer")
 maxObs  = input.int(12, "Max order blocks kept per layer")
 unmitOnly = input.bool(false, "Show unmitigated order blocks only")
+
+colStructA = input.color(#1A1A1A, "Structure — main TF (dark)", group = "Structure colors")
+colStructB = input.color(color.gray, "Structure — second TF (grey)", group = "Structure colors")
 
 colLvlTxt    = input.color(color.white, "Caption — levels", group = "Caption colors")
 colObBearTxt = input.color(#FB7185, "Caption — bearish OB", group = "Caption colors")
@@ -117,6 +124,35 @@ var loBufH = array.new<float>()
 var loBufL = array.new<float>()
 var loBufC = array.new<float>()
 
+// market-structure zigzag state per layer: [prevHigh, prevLow, lastSwingT, lastSwingP]
+var aSw = array.new<float>(4, na)
+var aZz = array.new<line>()
+var aZzLbl = array.new<label>()
+var bSw = array.new<float>(4, na)
+var bZz = array.new<line>()
+var bZzLbl = array.new<label>()
+
+// register a confirmed swing: identify it (HH/HL/LH/LL vs the previous swing
+// of its kind), label it, and extend the layer's zigzag to it
+f_swing(stArr, zzL, zzLb, isLow, pT, p, col, w) =>
+    prevHi = array.get(stArr, 0)
+    prevLo = array.get(stArr, 1)
+    lastT = array.get(stArr, 2)
+    lastP = array.get(stArr, 3)
+    tag = isLow ? (na(prevLo) ? "L" : p < prevLo ? "LL" : "HL") : (na(prevHi) ? "H" : p > prevHi ? "HH" : "LH")
+    array.push(zzLb, label.new(math.round(pT), p, tag, xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = col, size = size.small))
+    if not na(lastT)
+        array.push(zzL, line.new(math.round(lastT), lastP, math.round(pT), p, xloc = xloc.bar_time, color = col, width = w))
+    array.set(stArr, isLow ? 1 : 0, p)
+    array.set(stArr, 2, pT)
+    array.set(stArr, 3, p)
+    while array.size(zzL) > 60
+        line.delete(array.get(zzL, 0))
+        array.remove(zzL, 0)
+    while array.size(zzLb) > 61
+        label.delete(array.get(zzLb, 0))
+        array.remove(zzLb, 0)
+
 aOn = timeframe.in_seconds(tfA) >= cSec
 bOn = bIsLo or timeframe.in_seconds(tfB) >= cSec
 obName = f_tfName(timeframe.period)
@@ -179,18 +215,20 @@ if barstate.isconfirmed
                         array.push(bFar, fH)
                         array.push(bIsLow, true)
                         array.push(bState, 0)
-                        array.push(bLine, line.new(math.round(pt), array.get(loBufL, ctr), time, array.get(loBufL, ctr), xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+                        array.push(bLine, line.new(math.round(pt), array.get(loBufL, ctr), time, array.get(loBufL, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
                         array.push(bLbl, label.new(time, array.get(loBufL, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
                         array.push(bBox, box(na))
+                        f_swing(bSw, bZz, bZzLbl, true, pt, array.get(loBufL, ctr), colStructB, 1)
                     if isPh and (na(bLastPhT) or pt != bLastPhT)
                         bLastPhT := pt
                         array.push(bP, array.get(loBufH, ctr))
                         array.push(bFar, fL)
                         array.push(bIsLow, false)
                         array.push(bState, 0)
-                        array.push(bLine, line.new(math.round(pt), array.get(loBufH, ctr), time, array.get(loBufH, ctr), xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+                        array.push(bLine, line.new(math.round(pt), array.get(loBufH, ctr), time, array.get(loBufH, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
                         array.push(bLbl, label.new(time, array.get(loBufH, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
                         array.push(bBox, box(na))
+                        f_swing(bSw, bZz, bZzLbl, false, pt, array.get(loBufH, ctr), colStructB, 1)
             while array.size(loBufT) > 400
                 array.remove(loBufT, 0)
                 array.remove(loBufO, 0)
@@ -205,18 +243,20 @@ if barstate.isconfirmed
         array.push(aFar, aBodyHi)
         array.push(aIsLow, true)
         array.push(aState, 0)
-        array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
+        array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(aBox, box(na))
+        f_swing(aSw, aZz, aZzLbl, true, aPT, aPl, colStructA, 2)
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
         array.push(aFar, aBodyLo)
         array.push(aIsLow, false)
         array.push(aState, 0)
-        array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(color.white, 25), width = 2))
+        array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
         array.push(aBox, box(na))
+        f_swing(aSw, aZz, aZzLbl, false, aPT, aPh, colStructA, 2)
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
         label.delete(array.get(aLbl, 0))
@@ -304,18 +344,20 @@ if barstate.isconfirmed
         array.push(bFar, bBodyHi)
         array.push(bIsLow, true)
         array.push(bState, 0)
-        array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+        array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(bBox, box(na))
+        f_swing(bSw, bZz, bZzLbl, true, bPT, bPl, colStructB, 1)
     if bOn and not bIsLo and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
         array.push(bFar, bBodyLo)
         array.push(bIsLow, false)
         array.push(bState, 0)
-        array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(color.silver, 35), width = 1))
+        array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
         array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
         array.push(bBox, box(na))
+        f_swing(bSw, bZz, bZzLbl, false, bPT, bPh, colStructB, 1)
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
         label.delete(array.get(bLbl, 0))
