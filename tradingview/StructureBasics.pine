@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v2.2 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v2.3 ──────────────────────────────────────────────────
 // v0.8 foundation + chart-adaptive structure layers:
 //
 //   • The two structure layers FOLLOW THE CHART TIMEFRAME:
@@ -9,10 +9,13 @@
 //     Layer A is the chart's own structure (major, DARK), layer B the one
 //     below it (minor, GREY). Auto mode can be turned off to pick both
 //     timeframes manually.
-//   • Market structure is marked and identified: a zigzag connects the
-//     confirmed swings of each layer, and every swing is labeled HH / HL /
-//     LH / LL. Main timeframe draws as the dark thick line, the second one
-//     grey and thin (both colors configurable).
+//   • Market structure is marked: a zigzag connects the confirmed swings of
+//     each layer. Main timeframe draws as the dark thick line, the second
+//     one grey and thin (both colors configurable).
+//   • Break classification: a BOS needs a CANDLE CLOSURE through the level —
+//     a wick through is only a liquidity Sweep. Both are labeled at the
+//     break bar; a swept level later closed through upgrades to BOS, and
+//     S/D flips only ever fire on a true BOS.
 //   • Every confirmed swing low/high of each layer gets a level line
 //     captioned with its timeframe name, drawn from the swing until price
 //     trades through it.
@@ -48,6 +51,8 @@ colLvlTxt    = input.color(color.white, "Caption — levels", group = "Caption c
 colObBearTxt = input.color(#FB7185, "Caption — bearish OB", group = "Caption colors")
 colObBullTxt = input.color(#4ADE80, "Caption — bullish OB", group = "Caption colors")
 colFlipTxt   = input.color(#C084FC, "Caption — S/D Flip", group = "Caption colors")
+colBosTxt    = input.color(#60A5FA, "Caption — BOS", group = "Caption colors")
+colSweepTxt  = input.color(#FBBF24, "Caption — Liquidity Sweep", group = "Caption colors")
 
 color COL_UP = #4ADE80
 color COL_DN = #FB7185
@@ -85,9 +90,10 @@ tfBlo = bIsLo ? tfB : timeframe.period
 var aP = array.new<float>()
 var aFar = array.new<float>()
 var aIsLow = array.new<bool>()
-var aState = array.new<int>()      // 0 live line, 1 flipped box, 2 done
+var aState = array.new<int>()      // 0 live line, 1 flipped box, 2 done, 3 swept (wick only)
 var aLine = array.new<line>()
 var aLbl = array.new<label>()
+var aMark = array.new<label>()     // "BOS" / "Sweep" label at the break bar
 var aBox = array.new<box>()
 var float aLastPlT = na
 var float aLastPhT = na
@@ -106,6 +112,7 @@ var bIsLow = array.new<bool>()
 var bState = array.new<int>()
 var bLine = array.new<line>()
 var bLbl = array.new<label>()
+var bMark = array.new<label>()
 var bBox = array.new<box>()
 var float bLastPlT = na
 var float bLastPhT = na
@@ -124,34 +131,23 @@ var loBufH = array.new<float>()
 var loBufL = array.new<float>()
 var loBufC = array.new<float>()
 
-// market-structure zigzag state per layer: [prevHigh, prevLow, lastSwingT, lastSwingP]
+// market-structure zigzag state per layer: [unused, unused, lastSwingT, lastSwingP]
 var aSw = array.new<float>(4, na)
 var aZz = array.new<line>()
-var aZzLbl = array.new<label>()
 var bSw = array.new<float>(4, na)
 var bZz = array.new<line>()
-var bZzLbl = array.new<label>()
 
-// register a confirmed swing: identify it (HH/HL/LH/LL vs the previous swing
-// of its kind), label it, and extend the layer's zigzag to it
-f_swing(stArr, zzL, zzLb, isLow, pT, p, col, w) =>
-    prevHi = array.get(stArr, 0)
-    prevLo = array.get(stArr, 1)
+// register a confirmed swing: extend the layer's zigzag to it
+f_swing(stArr, zzL, pT, p, col, w) =>
     lastT = array.get(stArr, 2)
     lastP = array.get(stArr, 3)
-    tag = isLow ? (na(prevLo) ? "L" : p < prevLo ? "LL" : "HL") : (na(prevHi) ? "H" : p > prevHi ? "HH" : "LH")
-    array.push(zzLb, label.new(math.round(pT), p, tag, xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = col, size = size.small))
     if not na(lastT)
         array.push(zzL, line.new(math.round(lastT), lastP, math.round(pT), p, xloc = xloc.bar_time, color = col, width = w))
-    array.set(stArr, isLow ? 1 : 0, p)
     array.set(stArr, 2, pT)
     array.set(stArr, 3, p)
     while array.size(zzL) > 60
         line.delete(array.get(zzL, 0))
         array.remove(zzL, 0)
-    while array.size(zzLb) > 61
-        label.delete(array.get(zzLb, 0))
-        array.remove(zzLb, 0)
 
 aOn = timeframe.in_seconds(tfA) >= cSec
 bOn = bIsLo or timeframe.in_seconds(tfB) >= cSec
@@ -217,8 +213,9 @@ if barstate.isconfirmed
                         array.push(bState, 0)
                         array.push(bLine, line.new(math.round(pt), array.get(loBufL, ctr), time, array.get(loBufL, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
                         array.push(bLbl, label.new(time, array.get(loBufL, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+                        array.push(bMark, label(na))
                         array.push(bBox, box(na))
-                        f_swing(bSw, bZz, bZzLbl, true, pt, array.get(loBufL, ctr), colStructB, 1)
+                        f_swing(bSw, bZz, pt, array.get(loBufL, ctr), colStructB, 1)
                     if isPh and (na(bLastPhT) or pt != bLastPhT)
                         bLastPhT := pt
                         array.push(bP, array.get(loBufH, ctr))
@@ -227,8 +224,9 @@ if barstate.isconfirmed
                         array.push(bState, 0)
                         array.push(bLine, line.new(math.round(pt), array.get(loBufH, ctr), time, array.get(loBufH, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
                         array.push(bLbl, label.new(time, array.get(loBufH, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+                        array.push(bMark, label(na))
                         array.push(bBox, box(na))
-                        f_swing(bSw, bZz, bZzLbl, false, pt, array.get(loBufH, ctr), colStructB, 1)
+                        f_swing(bSw, bZz, pt, array.get(loBufH, ctr), colStructB, 1)
             while array.size(loBufT) > 400
                 array.remove(loBufT, 0)
                 array.remove(loBufO, 0)
@@ -245,8 +243,9 @@ if barstate.isconfirmed
         array.push(aState, 0)
         array.push(aLine, line.new(math.round(aPT), aPl, time, aPl, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
         array.push(aLbl, label.new(time, aPl, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
+        array.push(aMark, label(na))
         array.push(aBox, box(na))
-        f_swing(aSw, aZz, aZzLbl, true, aPT, aPl, colStructA, 2)
+        f_swing(aSw, aZz, aPT, aPl, colStructA, 2)
     if aOn and not na(aPh) and (na(aLastPhT) or aPT != aLastPhT)
         aLastPhT := aPT
         array.push(aP, aPh)
@@ -255,11 +254,14 @@ if barstate.isconfirmed
         array.push(aState, 0)
         array.push(aLine, line.new(math.round(aPT), aPh, time, aPh, xloc = xloc.bar_time, color = color.new(colStructA, 25), width = 2))
         array.push(aLbl, label.new(time, aPh, aName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.normal))
+        array.push(aMark, label(na))
         array.push(aBox, box(na))
-        f_swing(aSw, aZz, aZzLbl, false, aPT, aPh, colStructA, 2)
+        f_swing(aSw, aZz, aPT, aPh, colStructA, 2)
     while array.size(aP) > 2 * maxKeep
         line.delete(array.get(aLine, 0))
         label.delete(array.get(aLbl, 0))
+        if not na(array.get(aMark, 0))
+            label.delete(array.get(aMark, 0))
         if not na(array.get(aBox, 0))
             box.delete(array.get(aBox, 0))
         array.remove(aP, 0)
@@ -268,6 +270,7 @@ if barstate.isconfirmed
         array.remove(aState, 0)
         array.remove(aLine, 0)
         array.remove(aLbl, 0)
+        array.remove(aMark, 0)
         array.remove(aBox, 0)
 
     if array.size(aP) > 0
@@ -295,11 +298,19 @@ if barstate.isconfirmed
                         array.push(aObT, obT)
                         array.push(aObMade, time)
                         array.push(aObState, 0)
-                    if closeThrough and flipA
-                        array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
-                        array.set(aState, i, 1)
+                    line.set_x2(ln, time)
+                    if closeThrough
+                        // candle CLOSED through → BOS
+                        array.set(aMark, i, label.new(time, p, aName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        if flipA
+                            array.set(aBox, i, box.new(line.get_x1(ln), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
+                            array.set(aState, i, 1)
+                        else
+                            array.set(aState, i, 2)
                     else
-                        array.set(aState, i, 2)
+                        // wick took the level but no candle closure → Sweep
+                        array.set(aMark, i, label.new(time, p, aName + " Sweep", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colSweepTxt, size = size.small))
+                        array.set(aState, i, 3)
                 else
                     line.set_x2(ln, time)
                     label.set_x(array.get(aLbl, i), math.round(math.avg(line.get_x1(ln), time)))
@@ -308,6 +319,19 @@ if barstate.isconfirmed
                 reclaimed = isLow ? nz(aCloseEff, p) > array.get(aFar, i) : nz(aCloseEff, p) < array.get(aFar, i)
                 if reclaimed
                     array.set(aState, i, 2)
+            else if st == 3
+                // swept level: a later candle closure through it upgrades
+                // the sweep to a BOS
+                ct3 = isLow ? nz(aCloseEff, p + 1) < p : nz(aCloseEff, p - 1) > p
+                if ct3
+                    label.set_text(array.get(aMark, i), aName + " BOS")
+                    label.set_textcolor(array.get(aMark, i), colBosTxt)
+                    if flipA
+                        ln3 = array.get(aLine, i)
+                        array.set(aBox, i, box.new(line.get_x1(ln3), isLow ? array.get(aFar, i) : p, time, isLow ? p : array.get(aFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = aName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
+                        array.set(aState, i, 1)
+                    else
+                        array.set(aState, i, 2)
 
     // layer A order-block lifecycle: extend right until price trades back
     // INTO the box (mitigation touch), then freeze there — mitigated boxes
@@ -346,8 +370,9 @@ if barstate.isconfirmed
         array.push(bState, 0)
         array.push(bLine, line.new(math.round(bPT), bPl, time, bPl, xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
         array.push(bLbl, label.new(time, bPl, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+        array.push(bMark, label(na))
         array.push(bBox, box(na))
-        f_swing(bSw, bZz, bZzLbl, true, bPT, bPl, colStructB, 1)
+        f_swing(bSw, bZz, bPT, bPl, colStructB, 1)
     if bOn and not bIsLo and not na(bPh) and (na(bLastPhT) or bPT != bLastPhT)
         bLastPhT := bPT
         array.push(bP, bPh)
@@ -356,11 +381,14 @@ if barstate.isconfirmed
         array.push(bState, 0)
         array.push(bLine, line.new(math.round(bPT), bPh, time, bPh, xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
         array.push(bLbl, label.new(time, bPh, bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+        array.push(bMark, label(na))
         array.push(bBox, box(na))
-        f_swing(bSw, bZz, bZzLbl, false, bPT, bPh, colStructB, 1)
+        f_swing(bSw, bZz, bPT, bPh, colStructB, 1)
     while array.size(bP) > 2 * maxKeep
         line.delete(array.get(bLine, 0))
         label.delete(array.get(bLbl, 0))
+        if not na(array.get(bMark, 0))
+            label.delete(array.get(bMark, 0))
         if not na(array.get(bBox, 0))
             box.delete(array.get(bBox, 0))
         array.remove(bP, 0)
@@ -369,6 +397,7 @@ if barstate.isconfirmed
         array.remove(bState, 0)
         array.remove(bLine, 0)
         array.remove(bLbl, 0)
+        array.remove(bMark, 0)
         array.remove(bBox, 0)
 
     if array.size(bP) > 0
@@ -397,11 +426,17 @@ if barstate.isconfirmed
                         array.push(bObT, obT)
                         array.push(bObMade, time)
                         array.push(bObState, 0)
-                    if closeThrough and flipB
-                        array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
-                        array.set(bState, i, 1)
+                    line.set_x2(ln, time)
+                    if closeThrough
+                        array.set(bMark, i, label.new(time, p, bName + " BOS", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colBosTxt, size = size.small))
+                        if flipB
+                            array.set(bBox, i, box.new(line.get_x1(ln), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
+                            array.set(bState, i, 1)
+                        else
+                            array.set(bState, i, 2)
                     else
-                        array.set(bState, i, 2)
+                        array.set(bMark, i, label.new(time, p, bName + " Sweep", xloc = xloc.bar_time, style = isLow ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colSweepTxt, size = size.small))
+                        array.set(bState, i, 3)
                 else
                     line.set_x2(ln, time)
                     label.set_x(array.get(bLbl, i), math.round(math.avg(line.get_x1(ln), time)))
@@ -410,6 +445,17 @@ if barstate.isconfirmed
                 reclaimed = bIsLo ? (isLow ? nz(cMax, p) > array.get(bFar, i) : nz(cMin, p) < array.get(bFar, i)) : (isLow ? nz(bClose, p) > array.get(bFar, i) : nz(bClose, p) < array.get(bFar, i))
                 if reclaimed
                     array.set(bState, i, 2)
+            else if st == 3
+                ct3 = bIsLo ? (isLow ? nz(cMin, p + 1) < p : nz(cMax, p - 1) > p) : (isLow ? nz(bClose, p + 1) < p : nz(bClose, p - 1) > p)
+                if ct3
+                    label.set_text(array.get(bMark, i), bName + " BOS")
+                    label.set_textcolor(array.get(bMark, i), colBosTxt)
+                    if flipB
+                        ln3 = array.get(bLine, i)
+                        array.set(bBox, i, box.new(line.get_x1(ln3), isLow ? array.get(bFar, i) : p, time, isLow ? p : array.get(bFar, i), xloc = xloc.bar_time, bgcolor = color.new(isLow ? COL_DN : COL_UP, 80), border_color = color.new(isLow ? COL_DN : COL_UP, 55), text = bName + " S/D Flip", text_color = colFlipTxt, text_size = size.normal))
+                        array.set(bState, i, 1)
+                    else
+                        array.set(bState, i, 2)
 
     // layer B order-block lifecycle: freeze at the mitigation touch, keep dimmed
     if array.size(bObBox) > 0
