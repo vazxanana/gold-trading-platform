@@ -1,5 +1,5 @@
 //@version=6
-// ─── STRUCTURE BASICS v2.8 ──────────────────────────────────────────────────
+// ─── STRUCTURE BASICS v2.9 ──────────────────────────────────────────────────
 // v0.8 foundation + chart-adaptive structure layers:
 //
 //   • The two structure layers FOLLOW THE CHART TIMEFRAME:
@@ -12,6 +12,10 @@
 //     Layer A is the chart's own structure (major, DARK), layer B the one
 //     below it (minor, GREY). Auto mode can be turned off to pick both
 //     timeframes manually.
+//   • Structure source: swings can be detected from CLOSING PRICE (line
+//     chart, default) or from wicks — toggle in settings. Levels sit at the
+//     pivot close (or wick extreme), breaks stay closure-based, sweeps stay
+//     wick-based.
 //   • Market structure is marked: a zigzag connects the confirmed swings of
 //     each layer. Main timeframe draws as the dark thick line, the second
 //     one grey and thin (both colors configurable).
@@ -44,6 +48,7 @@
 indicator("Structure Basics", "StructBasics", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
 
 swS   = input.int(3, "Swing strength (bars each side)", minval = 2)
+useClose = input.bool(true, "Structure from closing price (line chart)")
 autoTf = input.bool(true, "Auto layers from chart timeframe")
 tfAin = input.timeframe("240", "Structure timeframe A (manual)")
 tfBin = input.timeframe("60", "Structure timeframe B (manual)")
@@ -81,8 +86,10 @@ tfB = autoTf ? (cSec >= 86400 ? "240" : cSec >= 14400 ? "60" : cSec >= 3600 ? "1
 // confirmed pivots of a layer + the consolidation body extremes around the
 // pivot (flip box far edge) — for layers AT or ABOVE the chart timeframe
 f_htf() =>
-    hpl = ta.pivotlow(low, swS, swS)
-    hph = ta.pivothigh(high, swS, swS)
+    srcLo = useClose ? close : low
+    srcHi = useClose ? close : high
+    hpl = ta.pivotlow(srcLo, swS, swS)
+    hph = ta.pivothigh(srcHi, swS, swS)
     pT = time[swS]
     bodyHi = ta.highest(math.max(open, close), swS * 2 + 1)
     bodyLo = ta.lowest(math.min(open, close), swS * 2 + 1)
@@ -233,6 +240,8 @@ if barstate.isconfirmed
                 cMin := na(cMin) ? cc : math.min(cMin, cc)
                 cMax := na(cMax) ? cc : math.max(cMax, cc)
                 n = array.size(loBufT)
+                srcLo = useClose ? loBufC : loBufL
+                srcHi = useClose ? loBufC : loBufH
                 ctr = n - 1 - swS
                 if ctr >= swS
                     isPl = true
@@ -241,9 +250,9 @@ if barstate.isconfirmed
                     float fL = na
                     for j = ctr - swS to ctr + swS
                         if j != ctr
-                            if array.get(loBufL, j) <= array.get(loBufL, ctr)
+                            if array.get(srcLo, j) <= array.get(srcLo, ctr)
                                 isPl := false
-                            if array.get(loBufH, j) >= array.get(loBufH, ctr)
+                            if array.get(srcHi, j) >= array.get(srcHi, ctr)
                                 isPh := false
                         bt = math.max(array.get(loBufO, j), array.get(loBufC, j))
                         bb = math.min(array.get(loBufO, j), array.get(loBufC, j))
@@ -253,29 +262,29 @@ if barstate.isconfirmed
                     if isPl and (na(bLastPlT) or pt != bLastPlT)
                         bLastPlT := pt
                         f_dropLive(bP, bFar, bIsLow, bState, bLine, bLbl, bMark, bBox, bSwpB, true)
-                        array.push(bP, array.get(loBufL, ctr))
+                        array.push(bP, array.get(srcLo, ctr))
                         array.push(bFar, fH)
                         array.push(bIsLow, true)
                         array.push(bState, 0)
-                        array.push(bLine, line.new(math.round(pt), array.get(loBufL, ctr), time, array.get(loBufL, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
-                        array.push(bLbl, label.new(time, array.get(loBufL, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+                        array.push(bLine, line.new(math.round(pt), array.get(srcLo, ctr), time, array.get(srcLo, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
+                        array.push(bLbl, label.new(time, array.get(srcLo, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
                         array.push(bMark, label(na))
                         array.push(bSwpB, -1)
                         array.push(bBox, box(na))
-                        f_swing(bSw, bZz, pt, array.get(loBufL, ctr), colStructB, 1)
+                        f_swing(bSw, bZz, pt, array.get(srcLo, ctr), colStructB, 1)
                     if isPh and (na(bLastPhT) or pt != bLastPhT)
                         bLastPhT := pt
                         f_dropLive(bP, bFar, bIsLow, bState, bLine, bLbl, bMark, bBox, bSwpB, false)
-                        array.push(bP, array.get(loBufH, ctr))
+                        array.push(bP, array.get(srcHi, ctr))
                         array.push(bFar, fL)
                         array.push(bIsLow, false)
                         array.push(bState, 0)
-                        array.push(bLine, line.new(math.round(pt), array.get(loBufH, ctr), time, array.get(loBufH, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
-                        array.push(bLbl, label.new(time, array.get(loBufH, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
+                        array.push(bLine, line.new(math.round(pt), array.get(srcHi, ctr), time, array.get(srcHi, ctr), xloc = xloc.bar_time, color = color.new(colStructB, 35), width = 1))
+                        array.push(bLbl, label.new(time, array.get(srcHi, ctr), bName, xloc = xloc.bar_time, style = label.style_none, textcolor = colLvlTxt, size = size.small))
                         array.push(bMark, label(na))
                         array.push(bSwpB, -1)
                         array.push(bBox, box(na))
-                        f_swing(bSw, bZz, pt, array.get(loBufH, ctr), colStructB, 1)
+                        f_swing(bSw, bZz, pt, array.get(srcHi, ctr), colStructB, 1)
 
     // ════════════════════════════ LAYER A ══════════════════════════════════
     if aOn and not na(aPl) and (na(aLastPlT) or aPT != aLastPlT)
