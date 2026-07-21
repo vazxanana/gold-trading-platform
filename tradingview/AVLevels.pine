@@ -1,5 +1,5 @@
 //@version=6
-// ─── A / V LEVELS v1.3 ──────────────────────────────────────────────────────
+// ─── A / V LEVELS v1.4 ──────────────────────────────────────────────────────
 // Marks the A-tops and V-bottoms of the CLOSING-PRICE line as levels:
 //
 //   • An "A" is a closing-price peak (line rises into it and falls away),
@@ -11,7 +11,8 @@
 //     at the pivot. The line waits for price to LEAVE the level first (one
 //     full bar clear of it — wick noise around the pivot never kills it),
 //     then extends right until price RETURNS to it:
-//         return candle CLOSES through  → line ends there (real break)
+//         return candle CLOSES through  → line ends there as a solid BOS
+//                                         line (blue by default)
 //         return is a WICK only         → line ends as a RED DASHED line
 //                                         (liquidity sweep)
 //     A level price closes through before ever leaving is discarded as a
@@ -32,6 +33,7 @@ maxKeep = input.int(40, "Max levels kept per side")
 
 colA    = input.color(#FB7185, "A level", group = "Colors")
 colV    = input.color(#4ADE80, "V level", group = "Colors")
+colBos  = input.color(#60A5FA, "BOS — broken level line", group = "Colors")
 colSweep = input.color(color.red, "Swept — dashed line", group = "Colors")
 colTxt  = input.color(color.white, "Label text", group = "Colors")
 colStruct = input.color(#1A1A1A, "Structure zigzag", group = "Colors")
@@ -136,6 +138,8 @@ if barstate.isconfirmed
                 else
                     if isV ? low <= p : high >= p
                         if isV ? close < p : close > p
+                            line.set_color(ln, colBos)
+                            line.set_width(ln, 2)
                             array.set(lvSt, i, 2)
                         else
                             line.set_style(ln, line.style_dashed)
