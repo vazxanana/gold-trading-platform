@@ -1,5 +1,5 @@
 //@version=6
-// ─── A / V LEVELS v1.2 ──────────────────────────────────────────────────────
+// ─── A / V LEVELS v1.3 ──────────────────────────────────────────────────────
 // Marks the A-tops and V-bottoms of the CLOSING-PRICE line as levels:
 //
 //   • An "A" is a closing-price peak (line rises into it and falls away),
@@ -16,6 +16,9 @@
 //                                         (liquidity sweep)
 //     A level price closes through before ever leaving is discarded as a
 //     false A/V.
+//   • Market structure: a zigzag connects the closing-price swings (the
+//     A/V pivots) in sequence — the line chart's structure drawn on the
+//     candle chart, color/width configurable.
 //   • "Keep only last A and last V" replaces older untaken levels of the
 //     same kind for a clean chart; broken/swept lines stay as history and
 //     age out via the max-kept setting.
@@ -23,6 +26,7 @@ indicator("A/V Levels", "AVLevels", overlay = true, max_lines_count = 500, max_l
 
 k       = input.int(1, "Strength (bars each side)", minval = 1)
 minAtr  = input.float(0.0, "Min leg size (ATR mult, 0 = off)", minval = 0, step = 0.1)
+showStruct = input.bool(true, "Market structure zigzag (closing price)")
 onlyLast = input.bool(false, "Keep only last A and last V")
 maxKeep = input.int(40, "Max levels kept per side")
 
@@ -30,6 +34,7 @@ colA    = input.color(#FB7185, "A level", group = "Colors")
 colV    = input.color(#4ADE80, "V level", group = "Colors")
 colSweep = input.color(color.red, "Swept — dashed line", group = "Colors")
 colTxt  = input.color(color.white, "Label text", group = "Colors")
+colStruct = input.color(#1A1A1A, "Structure zigzag", group = "Colors")
 
 atr = ta.atr(14)
 pa = ta.pivothigh(close, k, k)
@@ -41,6 +46,10 @@ var lvSt = array.new<int>()        // 0 live, 2 broken, 3 swept
 var lvLn = array.new<line>()
 var lvLb = array.new<label>()
 var lvLeft = array.new<bool>()     // price has left the level (armed)
+
+// closing-price market structure: last swing point + zigzag segments
+var zzS = array.new<float>(2, na)  // [lastSwingT, lastSwingP]
+var zz = array.new<line>()
 
 // replace older untaken levels of the same kind (clean-chart mode)
 f_dropLive(isV) =>
@@ -66,6 +75,14 @@ f_add(isV, p, pT) =>
     array.push(lvLn, line.new(math.round(pT), p, time, p, xloc = xloc.bar_time, color = color.new(col, 20), width = 1))
     array.push(lvLb, label.new(math.round(pT), p, isV ? "V" : "A", xloc = xloc.bar_time, style = isV ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colTxt, size = size.small))
     array.push(lvLeft, false)
+    if showStruct
+        if not na(array.get(zzS, 0))
+            array.push(zz, line.new(math.round(array.get(zzS, 0)), array.get(zzS, 1), math.round(pT), p, xloc = xloc.bar_time, color = colStruct, width = 1))
+        array.set(zzS, 0, pT)
+        array.set(zzS, 1, p)
+        while array.size(zz) > 120
+            line.delete(array.get(zz, 0))
+            array.remove(zz, 0)
     while array.size(lvP) > 2 * maxKeep
         // prune the oldest DEAD (broken/swept) level first — live untaken
         // levels are never dropped for the cap
