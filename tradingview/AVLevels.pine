@@ -1,5 +1,5 @@
 //@version=6
-// ─── A / V LEVELS v1.5 ──────────────────────────────────────────────────────
+// ─── A / V LEVELS v1.6 ──────────────────────────────────────────────────────
 // Marks the A-tops and V-bottoms of the CLOSING-PRICE line as levels:
 //
 //   • An "A" is a closing-price peak (line rises into it and falls away),
@@ -20,6 +20,10 @@
 //                                         line after all
 //     A level price closes through before ever leaving is discarded as a
 //     false A/V.
+//   • Directional levels (default on): while the market is going UP only
+//     the V lows are marked, going DOWN only the A highs — the trend is the
+//     direction of the last closure break (closing through an A = up,
+//     through a V = down). Toggle off to mark both sides always.
 //   • Market structure: a zigzag connects the closing-price swings (the
 //     A/V pivots) in sequence — the line chart's structure drawn on the
 //     candle chart, color/width configurable.
@@ -30,6 +34,7 @@ indicator("A/V Levels", "AVLevels", overlay = true, max_lines_count = 500, max_l
 
 k       = input.int(1, "Strength (bars each side)", minval = 1)
 minAtr  = input.float(0.0, "Min leg size (ATR mult, 0 = off)", minval = 0, step = 0.1)
+dirOnly = input.bool(true, "Up marks lows, down marks highs")
 showStruct = input.bool(true, "Market structure zigzag (closing price)")
 onlyLast = input.bool(false, "Keep only last A and last V")
 maxKeep = input.int(40, "Max levels kept per side")
@@ -54,6 +59,9 @@ var lvLb = array.new<label>()
 var lvLeft = array.new<bool>()     // price has left the level (armed)
 var lvSwpB = array.new<int>()      // bar_index of the sweep (upgrade window)
 
+// trend = direction of the last closure break (1 up, -1 down)
+var int trendDir = 0
+
 // closing-price market structure: last swing point + zigzag segments
 var zzS = array.new<float>(2, na)  // [lastSwingT, lastSwingP]
 var zz = array.new<line>()
@@ -73,6 +81,17 @@ f_dropLive(isV) =>
                 array.remove(lvLeft, j)
                 array.remove(lvSwpB, j)
 
+// every confirmed pivot extends the structure zigzag, level or not
+f_zz(p, pT) =>
+    if showStruct
+        if not na(array.get(zzS, 0))
+            array.push(zz, line.new(math.round(array.get(zzS, 0)), array.get(zzS, 1), math.round(pT), p, xloc = xloc.bar_time, color = colStruct, width = 1))
+        array.set(zzS, 0, pT)
+        array.set(zzS, 1, p)
+        while array.size(zz) > 120
+            line.delete(array.get(zz, 0))
+            array.remove(zz, 0)
+
 f_add(isV, p, pT) =>
     if onlyLast
         f_dropLive(isV)
@@ -84,14 +103,6 @@ f_add(isV, p, pT) =>
     array.push(lvLb, label.new(math.round(pT), p, isV ? "V" : "A", xloc = xloc.bar_time, style = isV ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colTxt, size = size.small))
     array.push(lvLeft, false)
     array.push(lvSwpB, -1)
-    if showStruct
-        if not na(array.get(zzS, 0))
-            array.push(zz, line.new(math.round(array.get(zzS, 0)), array.get(zzS, 1), math.round(pT), p, xloc = xloc.bar_time, color = colStruct, width = 1))
-        array.set(zzS, 0, pT)
-        array.set(zzS, 1, p)
-        while array.size(zz) > 120
-            line.delete(array.get(zz, 0))
-            array.remove(zz, 0)
     while array.size(lvP) > 2 * maxKeep
         // prune the oldest DEAD (broken/swept) level first — live untaken
         // levels are never dropped for the cap
@@ -117,13 +128,17 @@ if barstate.isconfirmed
         legIn = close[k] - close[2 * k]
         legOut = close[k] - close
         if minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(atr, 0)
-            f_add(false, close[k], time[k])
+            f_zz(close[k], time[k])
+            if not dirOnly or trendDir <= 0
+                f_add(false, close[k], time[k])
     // confirmed V: closing-price trough at bar k back
     if not na(pv)
         legIn = close[2 * k] - close[k]
         legOut = close - close[k]
         if minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(atr, 0)
-            f_add(true, close[k], time[k])
+            f_zz(close[k], time[k])
+            if not dirOnly or trendDir >= 0
+                f_add(true, close[k], time[k])
 
     // level lifecycle: the level must first be LEFT (a full bar clear of
     // it), then it extends until price RETURNS — closure through on the
@@ -140,12 +155,14 @@ if barstate.isconfirmed
                         array.set(lvLeft, i, true)
                     else if isV ? close < p : close > p
                         // closed beyond before ever leaving — not a real A/V
+                        trendDir := isV ? -1 : 1
                         line.delete(ln)
                         label.delete(array.get(lvLb, i))
                         array.set(lvSt, i, 2)
                 else
                     if isV ? low <= p : high >= p
                         if isV ? close < p : close > p
+                            trendDir := isV ? -1 : 1
                             line.set_color(ln, colBos)
                             line.set_width(ln, 2)
                             array.set(lvSt, i, 2)
@@ -158,6 +175,7 @@ if barstate.isconfirmed
                 // a closure through shortly after the sweep is a BOS after all
                 p = array.get(lvP, i)
                 if array.get(lvIsV, i) ? close < p : close > p
+                    trendDir := array.get(lvIsV, i) ? -1 : 1
                     ln = array.get(lvLn, i)
                     line.set_x2(ln, time)
                     line.set_style(ln, line.style_solid)
