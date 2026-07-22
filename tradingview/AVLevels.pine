@@ -1,5 +1,5 @@
 //@version=6
-// ─── A / V LEVELS v1.6 ──────────────────────────────────────────────────────
+// ─── A / V LEVELS v1.7 ──────────────────────────────────────────────────────
 // Marks the A-tops and V-bottoms of the CLOSING-PRICE line as levels:
 //
 //   • An "A" is a closing-price peak (line rises into it and falls away),
@@ -18,8 +18,8 @@
 //                                         closes through within the upgrade
 //                                         window the dash becomes the BOS
 //                                         line after all
-//     A level price closes through before ever leaving is discarded as a
-//     false A/V.
+//     A level price closes through before ever leaving ends as a BOS line
+//     right there — levels are never silently discarded.
 //   • Directional levels (default on): while the market is going UP only
 //     the V lows are marked, going DOWN only the A highs — the trend is the
 //     direction of the last closure break (closing through an A = up,
@@ -154,10 +154,11 @@ if barstate.isconfirmed
                     if isV ? low > p : high < p
                         array.set(lvLeft, i, true)
                     else if isV ? close < p : close > p
-                        // closed beyond before ever leaving — not a real A/V
+                        // closed beyond before ever leaving — still a break:
+                        // end it as a BOS line instead of discarding
                         trendDir := isV ? -1 : 1
-                        line.delete(ln)
-                        label.delete(array.get(lvLb, i))
+                        line.set_color(ln, colBos)
+                        line.set_width(ln, 2)
                         array.set(lvSt, i, 2)
                 else
                     if isV ? low <= p : high >= p

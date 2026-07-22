@@ -1,5 +1,5 @@
 //@version=6
-// ─── H1 A/V LEVELS v1.0 ─────────────────────────────────────────────────────
+// ─── H1 A/V LEVELS v1.1 ─────────────────────────────────────────────────────
 // Locates the A-tops and V-bottoms of the H1 CLOSING-PRICE line and draws
 // them on ANY chart timeframe (chart at/below H1 for exact data; above H1
 // it falls back to the chart's own timeframe):
@@ -15,7 +15,8 @@
 //         H1 wick only              → red dashed sweep; a close-through
 //                                     within the upgrade window converts
 //                                     it to the BOS line after all
-//     A level the H1 closes through before ever leaving is discarded.
+//     A level the H1 closes through before ever leaving ends as a BOS
+//     line right there — levels are never silently discarded.
 //   • Directional levels (default on): while the last closure break points
 //     UP only V lows are marked, DOWN only A highs. Toggle for both sides.
 //   • H1 market structure: a zigzag connects the H1 closing-price swings.
@@ -163,10 +164,12 @@ if barstate.isconfirmed
                         if isV ? h1L > p : h1H < p
                             array.set(lvLeft, i, true)
                         else if isV ? h1C < p : h1C > p
-                            // closed through before ever leaving — false A/V
+                            // closed through before ever leaving — still a
+                            // break of the level: end it as a BOS line
                             trendDir := isV ? -1 : 1
-                            line.delete(ln)
-                            label.delete(array.get(lvLb, i))
+                            line.set_x2(ln, time)
+                            line.set_color(ln, colBos)
+                            line.set_width(ln, 2)
                             array.set(lvSt, i, 2)
                     else
                         if isV ? h1L <= p : h1H >= p
