@@ -1,5 +1,5 @@
 //@version=6
-// ─── H1 A/V LEVELS v1.2 ─────────────────────────────────────────────────────
+// ─── H1 A/V LEVELS v1.3 ─────────────────────────────────────────────────────
 // Locates the A-tops and V-bottoms of the H1 CLOSING-PRICE line and draws
 // them on ANY chart timeframe (chart at/below H1 for exact data; above H1
 // it falls back to the chart's own timeframe):
@@ -22,7 +22,10 @@
 //     side are dropped — so a down-leg keeps its origin top and every lower
 //     high as long lines, an up-leg keeps its lows. Toggle off to keep both
 //     sides always.
-//   • H1 market structure: a zigzag connects the H1 closing-price swings.
+//   • H1 market structure is marked from the closing-price line: every
+//     closure break is labeled at the break candle — WITH the trend = "BOS"
+//     (blue), AGAINST it (first break the other way) = "ChoCh" (orange) —
+//     and a zigzag connects the H1 closing-price swings.
 indicator("H1 A/V Levels", "H1 AV", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 k       = input.int(1, "Strength (H1 bars each side)", minval = 1)
@@ -36,6 +39,7 @@ upWin   = input.int(6, "Sweep-to-BOS upgrade window (H1 bars)", minval = 1)
 colA    = input.color(#FB7185, "A level", group = "Colors")
 colV    = input.color(#4ADE80, "V level", group = "Colors")
 colBos  = input.color(#60A5FA, "BOS — broken level line", group = "Colors")
+colCho  = input.color(#F97316, "ChoCh label", group = "Colors")
 colSweep = input.color(color.red, "Swept — dashed line", group = "Colors")
 colTxt  = input.color(color.white, "Label text", group = "Colors")
 colStruct = input.color(#1A1A1A, "Structure zigzag", group = "Colors")
@@ -61,9 +65,21 @@ var lvSwp = array.new<int>()       // H1 sequence number of the sweep
 var int h1Seq = 0
 var int trendDir = 0               // direction of the last closure break
 
+// BOS/ChoCh labels at closure breaks
+var brkLbl = array.new<label>()
+
 // H1 closing-price structure zigzag
 var zzS = array.new<float>(2, na)  // [lastSwingT, lastSwingP]
 var zz = array.new<line>()
+
+// label a closure break of the closing-price line: with the current trend
+// it is a BOS, against it a ChoCh (call BEFORE updating trendDir)
+f_brk(isV, p) =>
+    isCho = isV ? trendDir == 1 : trendDir == -1
+    array.push(brkLbl, label.new(time, p, isCho ? "ChoCh" : "BOS", xloc = xloc.bar_time, style = isV ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = isCho ? colCho : colBos, size = size.small))
+    while array.size(brkLbl) > 60
+        label.delete(array.get(brkLbl, 0))
+        array.remove(brkLbl, 0)
 
 f_zz(p, pT) =>
     if showStruct
@@ -169,6 +185,7 @@ if barstate.isconfirmed
                         else if isV ? h1C < p : h1C > p
                             // closed through before ever leaving — still a
                             // break of the level: end it as a BOS line
+                            f_brk(isV, p)
                             trendDir := isV ? -1 : 1
                             line.set_x2(ln, time)
                             line.set_color(ln, colBos)
@@ -178,6 +195,7 @@ if barstate.isconfirmed
                         if isV ? h1L <= p : h1H >= p
                             line.set_x2(ln, time)
                             if isV ? h1C < p : h1C > p
+                                f_brk(isV, p)
                                 trendDir := isV ? -1 : 1
                                 line.set_color(ln, colBos)
                                 line.set_width(ln, 2)
@@ -190,6 +208,7 @@ if barstate.isconfirmed
                 else if st == 3 and h1Seq - array.get(lvSwp, i) <= upWin
                     // closure through shortly after the sweep — BOS after all
                     if isV ? h1C < p : h1C > p
+                        f_brk(isV, p)
                         trendDir := isV ? -1 : 1
                         ln = array.get(lvLn, i)
                         line.set_x2(ln, time)
