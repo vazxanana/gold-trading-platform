@@ -1,0 +1,199 @@
+//@version=6
+// ─── H1 A/V LEVELS v1.0 ─────────────────────────────────────────────────────
+// Locates the A-tops and V-bottoms of the H1 CLOSING-PRICE line and draws
+// them on ANY chart timeframe (chart at/below H1 for exact data; above H1
+// it falls back to the chart's own timeframe):
+//
+//   • An "A" is an H1 closing-price peak, a "V" an H1 trough — strength-k
+//     pivots on H1 closes (default 1 = the pure A/V shape), optional
+//     sharpness filter in H1 ATR(14) multiples on both legs.
+//   • Each A/V draws a level line at its H1 closing price, labeled A or V.
+//     The level first waits for a FULL H1 candle clear of it (wick noise
+//     around the pivot never kills it), then extends until H1 price
+//     RETURNS to it:
+//         H1 candle CLOSES through  → solid blue BOS line
+//         H1 wick only              → red dashed sweep; a close-through
+//                                     within the upgrade window converts
+//                                     it to the BOS line after all
+//     A level the H1 closes through before ever leaving is discarded.
+//   • Directional levels (default on): while the last closure break points
+//     UP only V lows are marked, DOWN only A highs. Toggle for both sides.
+//   • H1 market structure: a zigzag connects the H1 closing-price swings.
+indicator("H1 A/V Levels", "H1 AV", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+k       = input.int(1, "Strength (H1 bars each side)", minval = 1)
+minAtr  = input.float(0.0, "Min leg size (H1 ATR mult, 0 = off)", minval = 0, step = 0.1)
+dirOnly = input.bool(true, "Up marks lows, down marks highs")
+showStruct = input.bool(true, "H1 market structure zigzag")
+onlyLast = input.bool(false, "Keep only last A and last V")
+maxKeep = input.int(40, "Max levels kept per side")
+upWin   = input.int(6, "Sweep-to-BOS upgrade window (H1 bars)", minval = 1)
+
+colA    = input.color(#FB7185, "A level", group = "Colors")
+colV    = input.color(#4ADE80, "V level", group = "Colors")
+colBos  = input.color(#60A5FA, "BOS — broken level line", group = "Colors")
+colSweep = input.color(color.red, "Swept — dashed line", group = "Colors")
+colTxt  = input.color(color.white, "Label text", group = "Colors")
+colStruct = input.color(#1A1A1A, "Structure zigzag", group = "Colors")
+
+// last CONFIRMED H1 candle (falls back to chart TF above H1)
+htf = timeframe.in_seconds(timeframe.period) <= 3600 ? "60" : timeframe.period
+f_src() =>
+    [high[1], low[1], close[1], time[1], ta.atr(14)[1]]
+[h1H, h1L, h1C, h1T, h1Atr] = request.security(syminfo.tickerid, htf, f_src(), lookahead = barmerge.lookahead_on)
+
+// rolling buffer of confirmed H1 closes for pivot detection
+var qT = array.new<float>()
+var qC = array.new<float>()
+var float lastH1T = na
+
+var lvP  = array.new<float>()
+var lvIsV = array.new<bool>()
+var lvSt = array.new<int>()        // 0 live, 2 broken, 3 swept
+var lvLn = array.new<line>()
+var lvLb = array.new<label>()
+var lvLeft = array.new<bool>()     // an H1 candle has traded clear of it
+var lvSwp = array.new<int>()       // H1 sequence number of the sweep
+var int h1Seq = 0
+var int trendDir = 0               // direction of the last closure break
+
+// H1 closing-price structure zigzag
+var zzS = array.new<float>(2, na)  // [lastSwingT, lastSwingP]
+var zz = array.new<line>()
+
+f_zz(p, pT) =>
+    if showStruct
+        if not na(array.get(zzS, 0))
+            array.push(zz, line.new(math.round(array.get(zzS, 0)), array.get(zzS, 1), math.round(pT), p, xloc = xloc.bar_time, color = colStruct, width = 1))
+        array.set(zzS, 0, pT)
+        array.set(zzS, 1, p)
+        while array.size(zz) > 120
+            line.delete(array.get(zz, 0))
+            array.remove(zz, 0)
+
+f_dropLive(isV) =>
+    if array.size(lvP) > 0
+        for j = array.size(lvP) - 1 to 0
+            if array.get(lvSt, j) == 0 and array.get(lvIsV, j) == isV
+                line.delete(array.get(lvLn, j))
+                label.delete(array.get(lvLb, j))
+                array.remove(lvP, j)
+                array.remove(lvIsV, j)
+                array.remove(lvSt, j)
+                array.remove(lvLn, j)
+                array.remove(lvLb, j)
+                array.remove(lvLeft, j)
+                array.remove(lvSwp, j)
+
+f_add(isV, p, pT) =>
+    if onlyLast
+        f_dropLive(isV)
+    col = isV ? colV : colA
+    array.push(lvP, p)
+    array.push(lvIsV, isV)
+    array.push(lvSt, 0)
+    array.push(lvLn, line.new(math.round(pT), p, time, p, xloc = xloc.bar_time, color = color.new(col, 20), width = 1))
+    array.push(lvLb, label.new(math.round(pT), p, isV ? "V" : "A", xloc = xloc.bar_time, style = isV ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colTxt, size = size.small))
+    array.push(lvLeft, false)
+    array.push(lvSwp, -1)
+    while array.size(lvP) > 2 * maxKeep
+        // prune the oldest DEAD level first — live levels are never dropped
+        rm = 0
+        if array.get(lvSt, 0) == 0
+            for q = 0 to array.size(lvP) - 1
+                if array.get(lvSt, q) != 0
+                    rm := q
+                    break
+        line.delete(array.get(lvLn, rm))
+        label.delete(array.get(lvLb, rm))
+        array.remove(lvP, rm)
+        array.remove(lvIsV, rm)
+        array.remove(lvSt, rm)
+        array.remove(lvLn, rm)
+        array.remove(lvLb, rm)
+        array.remove(lvLeft, rm)
+        array.remove(lvSwp, rm)
+
+if barstate.isconfirmed
+    // process each newly confirmed H1 candle exactly once
+    if not na(h1T) and (na(lastH1T) or h1T != lastH1T)
+        lastH1T := h1T
+        h1Seq += 1
+        array.push(qT, h1T)
+        array.push(qC, h1C)
+        while array.size(qT) > 400
+            array.remove(qT, 0)
+            array.remove(qC, 0)
+
+        // confirmed H1 A/V pivot at k candles back (strict close pivot)
+        n = array.size(qC)
+        ctr = n - 1 - k
+        if ctr >= k
+            isA = true
+            isVv = true
+            for j = ctr - k to ctr + k
+                if j != ctr
+                    if array.get(qC, j) >= array.get(qC, ctr)
+                        isA := false
+                    if array.get(qC, j) <= array.get(qC, ctr)
+                        isVv := false
+            pv = array.get(qC, ctr)
+            pt = array.get(qT, ctr)
+            legIn = math.abs(pv - array.get(qC, math.max(ctr - k, 0)))
+            legOut = math.abs(pv - array.get(qC, n - 1))
+            sharpOk = minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(h1Atr, 0)
+            if isA and sharpOk
+                f_zz(pv, pt)
+                if not dirOnly or trendDir <= 0
+                    f_add(false, pv, pt)
+            if isVv and sharpOk
+                f_zz(pv, pt)
+                if not dirOnly or trendDir >= 0
+                    f_add(true, pv, pt)
+
+        // level lifecycle against this H1 candle
+        if array.size(lvP) > 0
+            for i = 0 to array.size(lvP) - 1
+                st = array.get(lvSt, i)
+                p = array.get(lvP, i)
+                isV = array.get(lvIsV, i)
+                if st == 0
+                    ln = array.get(lvLn, i)
+                    if not array.get(lvLeft, i)
+                        if isV ? h1L > p : h1H < p
+                            array.set(lvLeft, i, true)
+                        else if isV ? h1C < p : h1C > p
+                            // closed through before ever leaving — false A/V
+                            trendDir := isV ? -1 : 1
+                            line.delete(ln)
+                            label.delete(array.get(lvLb, i))
+                            array.set(lvSt, i, 2)
+                    else
+                        if isV ? h1L <= p : h1H >= p
+                            line.set_x2(ln, time)
+                            if isV ? h1C < p : h1C > p
+                                trendDir := isV ? -1 : 1
+                                line.set_color(ln, colBos)
+                                line.set_width(ln, 2)
+                                array.set(lvSt, i, 2)
+                            else
+                                line.set_style(ln, line.style_dashed)
+                                line.set_color(ln, colSweep)
+                                array.set(lvSt, i, 3)
+                                array.set(lvSwp, i, h1Seq)
+                else if st == 3 and h1Seq - array.get(lvSwp, i) <= upWin
+                    // closure through shortly after the sweep — BOS after all
+                    if isV ? h1C < p : h1C > p
+                        trendDir := isV ? -1 : 1
+                        ln = array.get(lvLn, i)
+                        line.set_x2(ln, time)
+                        line.set_style(ln, line.style_solid)
+                        line.set_color(ln, colBos)
+                        line.set_width(ln, 2)
+                        array.set(lvSt, i, 2)
+
+    // extend live level lines every chart bar
+    if array.size(lvP) > 0
+        for i = 0 to array.size(lvP) - 1
+            if array.get(lvSt, i) == 0
+                line.set_x2(array.get(lvLn, i), time)
