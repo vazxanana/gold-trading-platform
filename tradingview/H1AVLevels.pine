@@ -1,5 +1,5 @@
 //@version=6
-// ─── H1 A/V LEVELS v1.1 ─────────────────────────────────────────────────────
+// ─── H1 A/V LEVELS v1.2 ─────────────────────────────────────────────────────
 // Locates the A-tops and V-bottoms of the H1 CLOSING-PRICE line and draws
 // them on ANY chart timeframe (chart at/below H1 for exact data; above H1
 // it falls back to the chart's own timeframe):
@@ -17,8 +17,11 @@
 //                                     it to the BOS line after all
 //     A level the H1 closes through before ever leaving ends as a BOS
 //     line right there — levels are never silently discarded.
-//   • Directional levels (default on): while the last closure break points
-//     UP only V lows are marked, DOWN only A highs. Toggle for both sides.
+//   • Directional levels (default on): both sides are always detected, and
+//     when the trend flips (a closure break) the live levels of the counter
+//     side are dropped — so a down-leg keeps its origin top and every lower
+//     high as long lines, an up-leg keeps its lows. Toggle off to keep both
+//     sides always.
 //   • H1 market structure: a zigzag connects the H1 closing-price swings.
 indicator("H1 A/V Levels", "H1 AV", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
@@ -145,12 +148,12 @@ if barstate.isconfirmed
             sharpOk = minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(h1Atr, 0)
             if isA and sharpOk
                 f_zz(pv, pt)
-                if not dirOnly or trendDir <= 0
-                    f_add(false, pv, pt)
+                f_add(false, pv, pt)
             if isVv and sharpOk
                 f_zz(pv, pt)
-                if not dirOnly or trendDir >= 0
-                    f_add(true, pv, pt)
+                f_add(true, pv, pt)
+
+        trendBefore = trendDir
 
         // level lifecycle against this H1 candle
         if array.size(lvP) > 0
@@ -194,6 +197,11 @@ if barstate.isconfirmed
                         line.set_color(ln, colBos)
                         line.set_width(ln, 2)
                         array.set(lvSt, i, 2)
+
+        // trend flipped on this candle → drop the live counter-side levels
+        // (down-leg keeps its highs, up-leg keeps its lows)
+        if dirOnly and trendDir != trendBefore and trendDir != 0
+            f_dropLive(trendDir == -1)
 
     // extend live level lines every chart bar
     if array.size(lvP) > 0
