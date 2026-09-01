@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Link the shipped bot file so EngulfingLogic is the exact same code the bot runs. -->
+    <Compile Include="../GoldEngulfingConfluence/GoldEngulfingConfluenceBot.cs" Link="GoldEngulfingConfluenceBot.cs" />
+    <PackageReference Include="cTrader.Automate" Version="1.0.17" ExcludeAssets="build;buildTransitive" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,1001 @@
+//@version=6
+// ─── ZONE STRUCTURE SMC ─────────────────────────────────────────────────────
+// TradingView port of the ZoneStructure cBot (ctrader/ZoneStructure).
+// Add to an XAUUSD M15 chart. Signals the same playbook the bot trades:
+//   1. H4 structure trend (bos/ChoCh engine) sets the direction.
+//   2. Price pulls back INTO a FRESH H4 supply (bear) / demand (bull)
+//      order-block zone → zone is "armed" for expiryBars chart bars.
+//   3. An M15 ChoCh (or BOS) back in the H4 direction while armed → signal.
+//   4. SL beyond the M15 swing the break launched from (zone edge fallback),
+//      TP at the nearest UNSWEPT H4/D1 swing, MinRR gate.
+// The streaming engine below is verified bar-for-bar identical to the bot's
+// batch engine (events, swings, zones, and final signals) in the repo's
+// equivalence harness before porting. Two accepted, practically-unreachable
+// divergences vs the C# stream reference: (1) the swing working set is
+// capped at 400 (≈2800 zone-TF bars of alternating swings — more than the
+// bot's own 600-bar window retains); (2) no explicit 11-bar higher-TF
+// warmup gate — request.security supplies deep HTF history predating the
+// chart on established symbols, so the warmup window is never visible.
+indicator("ZoneStructure SMC (H4 zones + M15 ChoCh)", "ZoneStructure", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500, max_bars_back = 500)
+
+// ── Inputs (defaults mirror the cBot) ───────────────────────────────────────
+dirOpt     = input.string("Both", "Trade direction", options = ["Both", "Long", "Short"])
+trigOpt    = input.string("ChoCh or BOS", "Entry trigger", options = ["ChoCh only", "ChoCh or BOS"])
+swS        = input.int(3, "Swing strength (bars each side)", minval = 2)
+useFresh   = input.bool(false, "Require FRESH (unmitigated) zone")
+useD1      = input.bool(false, "Require D1 trend alignment")
+expiryBars = input.int(192, "Zone armed expiry (chart bars)", minval = 4)
+tfZone     = input.timeframe("240", "Zone/trend timeframe")
+tfTgt      = input.timeframe("D", "Extra target timeframe")
+tfLines    = input.timeframe("240", "Break-of-structure lines timeframe (blank = chart)")
+slBuf      = input.float(1.5, "SL buffer beyond structure (USD)", step = 0.1)
+minSl      = input.float(3.0, "Min SL (USD)", step = 0.5)
+maxSl      = input.float(60.0, "Max SL (USD)", step = 1.0)
+minRR      = input.float(1.0, "Min reward:risk", step = 0.1)
+tgtOff     = input.float(0.5, "Target front-run offset (USD)", step = 0.1)
+onePos     = input.bool(true, "One signal at a time (wait for SL/TP hit)")
+showZones  = input.bool(true, "Draw current zones")
+showTrade  = input.bool(true, "Draw signal zone box + label")
+showLevels = input.bool(true, "Draw H4/D liquidity levels (unswept swings)")
+showDiag   = input.bool(true, "Show diagnostics (armed tint + break marks)")
+showChartOB = input.bool(true, "Mark chart-TF order blocks (break origins)")
+useFib     = input.bool(true, "Golden pocket filter (arm only zones near fib ~0.68)")
+closeFlip  = input.bool(true, "Close signal-position on H4 flip (structural exit)")
+trigWithin = input.int(192, "Trigger within bars of touch", minval = 1)
+fibMin     = input.float(0.60, "Fib retracement min", step = 0.01)
+fibMax     = input.float(0.79, "Fib retracement max", step = 0.01)
+
+color COL_DEMAND = #4ADE80
+color COL_SUPPLY = #FB7185
+color COL_GOLD = #FBBF24
+
+// ── Engine helpers ──────────────────────────────────────────────────────────
+// alternation rule: consecutive same-side pivots collapse into the extreme
+f_pushSwing(idxA, prcA, hiA, swpA, idx, price, isHigh) =>
+    n = array.size(idxA)
+    doPush = true
+    if n > 0
+        if array.get(hiA, n - 1) == isHigh
+            lastP = array.get(prcA, n - 1)
+            newWins = isHigh ? price >= lastP : price <= lastP
+            if newWins
+                array.remove(idxA, n - 1)
+                array.remove(prcA, n - 1)
+                array.remove(hiA, n - 1)
+                array.remove(swpA, n - 1)
+            else
+                doPush := false
+    if doPush
+        array.push(idxA, idx)
+        array.push(prcA, price)
+        array.push(hiA, isHigh)
+        array.push(swpA, false)
+        // keep the working set bounded; only targets >400 swings back are lost
+        if array.size(idxA) > 400
+            array.shift(idxA)
+            array.shift(prcA)
+            array.shift(hiA)
+            array.shift(swpA)
+    doPush
+
+// extreme bar of the leg between a broken swing and the break bar
+f_legOrigin(aHi, aLo, fromIdx, toIdx, wantLow) =>
+    b = math.min(fromIdx + 1, toIdx)
+    if fromIdx + 1 <= toIdx
+        for k = fromIdx + 1 to toIdx
+            better = wantLow ? array.get(aLo, k) < array.get(aLo, b) : array.get(aHi, k) > array.get(aHi, b)
+            if better
+                b := k
+    b
+
+// zone lifecycle: body close through far side invalidates; FRESH until price
+// trades back in after the impulse first left
+f_stepZone(znHiA, znLoA, znBullA, znInvA, znLeftA, znTouchA, zi, cH, cL, cC) =>
+    bull = array.get(znBullA, zi)
+    zhi = array.get(znHiA, zi)
+    zlo = array.get(znLoA, zi)
+    if bull ? cC < zlo : cC > zhi
+        array.set(znInvA, zi, true)
+    else
+        if not array.get(znLeftA, zi)
+            if bull ? cL > zhi : cH < zlo
+                array.set(znLeftA, zi, true)
+        else
+            if bull ? cL <= zhi : cH >= zlo
+                array.set(znTouchA, zi, true)
+    true
+
+// supply/demand zone = order block at the origin of a breaking leg
+f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, oIdx, demand, star, nowBar) =>
+    ob = oIdx
+    found = false
+    for k = 0 to 2
+        kk = oIdx - k
+        if kk >= 0 and not found
+            bearish = array.get(aC, kk) < array.get(aO, kk)
+            if demand ? bearish : not bearish
+                ob := kk
+                found := true
+    zhi = demand ? math.max(array.get(aO, ob), array.get(aC, ob)) : array.get(aH, ob)
+    zlo = demand ? array.get(aL, ob) : math.min(array.get(aO, ob), array.get(aC, ob))
+    array.push(znOrg, ob)
+    array.push(znOt, array.get(aT, ob))
+    array.push(znHi, zhi)
+    array.push(znLo, zlo)
+    array.push(znBull, demand)
+    array.push(znStar, star)
+    array.push(znInv, false)
+    array.push(znLeft, false)
+    array.push(znTouch, false)
+    array.push(znMade, nowBar)
+    zi = array.size(znOrg) - 1
+    if ob + 1 <= nowBar
+        for k = ob + 1 to nowBar
+            if not array.get(znInv, zi)
+                f_stepZone(znHi, znLo, znBull, znInv, znLeft, znTouch, zi, array.get(aH, k), array.get(aL, k), array.get(aC, k))
+    true
+
+// same-side zones that overlap collapse into the freshest one
+f_dedupe(hA, lA, fA, oA) =>
+    kH = array.new<float>()
+    kL = array.new<float>()
+    kF = array.new<float>()
+    kO = array.new<float>()
+    i = array.size(hA) - 1
+    while i >= 0
+        zh = array.get(hA, i)
+        zl = array.get(lA, i)
+        clash = false
+        if array.size(kH) > 0
+            for q = 0 to array.size(kH) - 1
+                ov = math.min(array.get(kH, q), zh) - math.max(array.get(kL, q), zl)
+                if ov > 0.5 * math.min(array.get(kH, q) - array.get(kL, q), zh - zl)
+                    clash := true
+        if not clash
+            array.insert(kH, 0, zh)
+            array.insert(kL, 0, zl)
+            array.insert(kF, 0, array.get(fA, i))
+            array.insert(kO, 0, array.get(oA, i))
+        i -= 1
+    [kH, kL, kF, kO]
+
+f_slot(a, j) =>
+    sz = array.size(a)
+    idx = sz - 4 + j
+    idx >= 0 ? array.get(a, idx) : na
+
+// ── The engine: streaming twin of the cBot's Smc.Compute ────────────────────
+f_engine(needView) =>
+    var aO = array.new<float>()
+    var aH = array.new<float>()
+    var aL = array.new<float>()
+    var aC = array.new<float>()
+    var aT = array.new<float>()
+    var swIdx = array.new<int>()
+    var swPrc = array.new<float>()
+    var swHi = array.new<bool>()
+    var swSwp = array.new<bool>()
+    var znOrg = array.new<int>()
+    var znOt = array.new<float>()
+    var znHi = array.new<float>()
+    var znLo = array.new<float>()
+    var znBull = array.new<bool>()
+    var znStar = array.new<bool>()
+    var znInv = array.new<bool>()
+    var znLeft = array.new<bool>()
+    var znTouch = array.new<bool>()
+    var znMade = array.new<int>()
+    var int trendI = 0
+    var int hiIdx = na
+    var float hiPrice = na
+    var bool hiSwept = false
+    var int loIdx = na
+    var float loPrice = na
+    var bool loSwept = false
+    var int idmIdx = na
+    var float idmPrice = na
+    var bool idmHigh = false
+
+    array.push(aO, open)
+    array.push(aH, high)
+    array.push(aL, low)
+    array.push(aC, close)
+    array.push(aT, time)
+    i = array.size(aC) - 1
+
+    if array.size(swPrc) > 0
+        for k = 0 to array.size(swPrc) - 1
+            if not array.get(swSwp, k)
+                if array.get(swHi, k) ? high > array.get(swPrc, k) : low < array.get(swPrc, k)
+                    array.set(swSwp, k, true)
+
+    evC = 0
+    evU = 0
+    float evP = na
+    int evI = na
+    float evT1 = na
+    float evZhi = na
+    float evZlo = na
+    float evZot = na
+    if i >= swS * 2
+        j = i - swS
+        pH = array.get(aH, j)
+        pL = array.get(aL, j)
+        isH = true
+        isL = true
+        for k = 1 to swS
+            if isH and not (pH > array.get(aH, j - k) and pH >= array.get(aH, j + k))
+                isH := false
+            if isL and not (pL < array.get(aL, j - k) and pL <= array.get(aL, j + k))
+                isL := false
+        if isH
+            f_pushSwing(swIdx, swPrc, swHi, swSwp, j, pH, true)
+            if trendI == 1
+                if na(hiPrice) or pH > nz(hiPrice, -1.0e18)
+                    hiIdx := j
+                    hiPrice := pH
+                    hiSwept := false
+            else if trendI == -1
+                if not na(hiPrice) and pH < nz(hiPrice, 1.0e18)
+                    idmIdx := j
+                    idmPrice := pH
+                    idmHigh := true
+            else
+                hiIdx := j
+                hiPrice := pH
+                hiSwept := false
+        if isL
+            f_pushSwing(swIdx, swPrc, swHi, swSwp, j, pL, false)
+            if trendI == -1
+                if na(loPrice) or pL < nz(loPrice, 1.0e18)
+                    loIdx := j
+                    loPrice := pL
+                    loSwept := false
+            else if trendI == 1
+                if not na(loPrice) and pL > nz(loPrice, -1.0e18)
+                    idmIdx := j
+                    idmPrice := pL
+                    idmHigh := false
+            else
+                loIdx := j
+                loPrice := pL
+                loSwept := false
+
+        if not na(hiPrice)
+            if close > hiPrice
+                evC := trendI == 1 ? 2 : 1
+                evU := 1
+                evP := hiPrice
+                evI := hiIdx
+                evT1 := array.get(aT, hiIdx)
+                org = f_legOrigin(aH, aL, hiIdx, i, true)
+                f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, true, trendI != 1, i)
+                evZhi := array.get(znHi, array.size(znHi) - 1)
+                evZlo := array.get(znLo, array.size(znLo) - 1)
+                evZot := array.get(znOt, array.size(znOt) - 1)
+                loIdx := org
+                loPrice := array.get(aL, org)
+                loSwept := false
+                trendI := 1
+                hiIdx := na
+                hiPrice := na
+                idmIdx := na
+                idmPrice := na
+            else if high > hiPrice and not hiSwept
+                hiSwept := true
+        if not na(loPrice)
+            if close < loPrice
+                evC := trendI == -1 ? 2 : 1
+                evU := 0
+                evP := loPrice
+                evI := loIdx
+                evT1 := array.get(aT, loIdx)
+                org = f_legOrigin(aH, aL, loIdx, i, false)
+                f_addZone(aO, aH, aL, aC, aT, znOrg, znOt, znHi, znLo, znBull, znStar, znInv, znLeft, znTouch, znMade, org, false, trendI != -1, i)
+                evZhi := array.get(znHi, array.size(znHi) - 1)
+                evZlo := array.get(znLo, array.size(znLo) - 1)
+                evZot := array.get(znOt, array.size(znOt) - 1)
+                hiIdx := org
+                hiPrice := array.get(aH, org)
+                hiSwept := false
+                trendI := -1
+                loIdx := na
+                loPrice := na
+                idmIdx := na
+                idmPrice := na
+            else if low < loPrice and not loSwept
+                loSwept := true
+        if not na(idmPrice)
+            if idmHigh ? high > idmPrice : low < idmPrice
+                idmIdx := na
+                idmPrice := na
+
+    // zone lifecycle for this bar (zones created this bar already replayed)
+    if array.size(znOrg) > 0
+        for zi = 0 to array.size(znOrg) - 1
+            if not array.get(znInv, zi) and array.get(znMade, zi) != i
+                f_stepZone(znHi, znLo, znBull, znInv, znLeft, znTouch, zi, high, low, close)
+
+    // compact away invalidated zones to keep loops bounded
+    if array.size(znOrg) > 120
+        tOrg = array.new<int>()
+        tOt = array.new<float>()
+        tHi = array.new<float>()
+        tLo = array.new<float>()
+        tBu = array.new<bool>()
+        tSt = array.new<bool>()
+        tLe = array.new<bool>()
+        tTo = array.new<bool>()
+        tMa = array.new<int>()
+        for zi = 0 to array.size(znOrg) - 1
+            if not array.get(znInv, zi)
+                array.push(tOrg, array.get(znOrg, zi))
+                array.push(tOt, array.get(znOt, zi))
+                array.push(tHi, array.get(znHi, zi))
+                array.push(tLo, array.get(znLo, zi))
+                array.push(tBu, array.get(znBull, zi))
+                array.push(tSt, array.get(znStar, zi))
+                array.push(tLe, array.get(znLeft, zi))
+                array.push(tTo, array.get(znTouch, zi))
+                array.push(tMa, array.get(znMade, zi))
+        array.clear(znOrg)
+        array.clear(znOt)
+        array.clear(znHi)
+        array.clear(znLo)
+        array.clear(znBull)
+        array.clear(znStar)
+        array.clear(znInv)
+        array.clear(znLeft)
+        array.clear(znTouch)
+        array.clear(znMade)
+        if array.size(tOrg) > 0
+            for zi = 0 to array.size(tOrg) - 1
+                array.push(znOrg, array.get(tOrg, zi))
+                array.push(znOt, array.get(tOt, zi))
+                array.push(znHi, array.get(tHi, zi))
+                array.push(znLo, array.get(tLo, zi))
+                array.push(znBull, array.get(tBu, zi))
+                array.push(znStar, array.get(tSt, zi))
+                array.push(znInv, false)
+                array.push(znLeft, array.get(tLe, zi))
+                array.push(znTouch, array.get(tTo, zi))
+                array.push(znMade, array.get(tMa, zi))
+
+    float s1hi = na
+    float s1lo = na
+    float s1fr = na
+    float s1ot = na
+    float s2hi = na
+    float s2lo = na
+    float s2fr = na
+    float s2ot = na
+    float s3hi = na
+    float s3lo = na
+    float s3fr = na
+    float s3ot = na
+    float s4hi = na
+    float s4lo = na
+    float s4fr = na
+    float s4ot = na
+    float d1hi = na
+    float d1lo = na
+    float d1fr = na
+    float d1ot = na
+    float d2hi = na
+    float d2lo = na
+    float d2fr = na
+    float d2ot = na
+    float d3hi = na
+    float d3lo = na
+    float d3fr = na
+    float d3ot = na
+    float d4hi = na
+    float d4lo = na
+    float d4fr = na
+    float d4ot = na
+    float L1 = na
+    float L2 = na
+    float L3 = na
+    float L4 = na
+    float L5 = na
+    float L6 = na
+    float L7 = na
+    float L8 = na
+    float A1 = na
+    float A2 = na
+    float A3 = na
+    float A4 = na
+    float A5 = na
+    float A6 = na
+    float A7 = na
+    float A8 = na
+    // the view pipeline is O(zones^2) per bar - only the higher-TF
+    // instances need it; the chart instance skips it entirely
+    if needView
+        // ── zone view: pad dojis with current 14-bar mean TR, dedupe, cap 4/side
+        n2 = array.size(aC)
+        atr = 0.0
+        cnt = 0
+        if n2 > 1
+            a0 = math.max(1, n2 - 14)
+            for k = a0 to n2 - 1
+                prevC = array.get(aC, k - 1)
+                tr = math.max(array.get(aH, k) - array.get(aL, k), math.max(math.abs(array.get(aH, k) - prevC), math.abs(array.get(aL, k) - prevC)))
+                atr += tr
+                cnt += 1
+        atr := cnt > 0 ? atr / cnt : 0.0
+        minH = 0.3 * atr
+
+        supHi = array.new<float>()
+        supLo = array.new<float>()
+        supFr = array.new<float>()
+        supOt = array.new<float>()
+        demHi = array.new<float>()
+        demLo = array.new<float>()
+        demFr = array.new<float>()
+        demOt = array.new<float>()
+        if array.size(znOrg) > 0
+            for zi = 0 to array.size(znOrg) - 1
+                if not array.get(znInv, zi)
+                    zh = array.get(znHi, zi)
+                    zl = array.get(znLo, zi)
+                    if zh - zl < minH
+                        if array.get(znBull, zi)
+                            zh := zl + minH
+                        else
+                            zl := zh - minH
+                    fr = array.get(znTouch, zi) ? 0.0 : array.get(znStar, zi) ? 2.0 : 1.0
+                    if array.get(znBull, zi)
+                        array.push(demHi, zh)
+                        array.push(demLo, zl)
+                        array.push(demFr, fr)
+                        array.push(demOt, array.get(znOt, zi))
+                    else
+                        array.push(supHi, zh)
+                        array.push(supLo, zl)
+                        array.push(supFr, fr)
+                        array.push(supOt, array.get(znOt, zi))
+        [ksHi, ksLo, ksFr, ksOt] = f_dedupe(supHi, supLo, supFr, supOt)
+        [kdHi, kdLo, kdFr, kdOt] = f_dedupe(demHi, demLo, demFr, demOt)
+
+        // ── unswept liquidity targets: ALL unswept swings (an unswept low
+        // is <= every later low, an unswept high >= every later high, so
+        // they sit beyond this context's close by construction; the live
+        // beyond-entry filter happens chart-side against the actual entry)
+        lowsB = array.new<float>()
+        highsA = array.new<float>()
+        if array.size(swPrc) > 0
+            for k = 0 to array.size(swPrc) - 1
+                if not array.get(swSwp, k)
+                    p = array.get(swPrc, k)
+                    if array.get(swHi, k)
+                        array.push(highsA, p)
+                    else
+                        array.push(lowsB, p)
+        array.sort(lowsB, order.descending)
+        array.sort(highsA, order.ascending)
+        s1hi := f_slot(ksHi, 0)
+        s1lo := f_slot(ksLo, 0)
+        s1fr := f_slot(ksFr, 0)
+        s1ot := f_slot(ksOt, 0)
+        s2hi := f_slot(ksHi, 1)
+        s2lo := f_slot(ksLo, 1)
+        s2fr := f_slot(ksFr, 1)
+        s2ot := f_slot(ksOt, 1)
+        s3hi := f_slot(ksHi, 2)
+        s3lo := f_slot(ksLo, 2)
+        s3fr := f_slot(ksFr, 2)
+        s3ot := f_slot(ksOt, 2)
+        s4hi := f_slot(ksHi, 3)
+        s4lo := f_slot(ksLo, 3)
+        s4fr := f_slot(ksFr, 3)
+        s4ot := f_slot(ksOt, 3)
+        d1hi := f_slot(kdHi, 0)
+        d1lo := f_slot(kdLo, 0)
+        d1fr := f_slot(kdFr, 0)
+        d1ot := f_slot(kdOt, 0)
+        d2hi := f_slot(kdHi, 1)
+        d2lo := f_slot(kdLo, 1)
+        d2fr := f_slot(kdFr, 1)
+        d2ot := f_slot(kdOt, 1)
+        d3hi := f_slot(kdHi, 2)
+        d3lo := f_slot(kdLo, 2)
+        d3fr := f_slot(kdFr, 2)
+        d3ot := f_slot(kdOt, 2)
+        d4hi := f_slot(kdHi, 3)
+        d4lo := f_slot(kdLo, 3)
+        d4fr := f_slot(kdFr, 3)
+        d4ot := f_slot(kdOt, 3)
+        L1 := array.size(lowsB) > 0 ? array.get(lowsB, 0) : na
+        L2 := array.size(lowsB) > 1 ? array.get(lowsB, 1) : na
+        L3 := array.size(lowsB) > 2 ? array.get(lowsB, 2) : na
+        L4 := array.size(lowsB) > 3 ? array.get(lowsB, 3) : na
+        L5 := array.size(lowsB) > 4 ? array.get(lowsB, 4) : na
+        L6 := array.size(lowsB) > 5 ? array.get(lowsB, 5) : na
+        L7 := array.size(lowsB) > 6 ? array.get(lowsB, 6) : na
+        L8 := array.size(lowsB) > 7 ? array.get(lowsB, 7) : na
+        A1 := array.size(highsA) > 0 ? array.get(highsA, 0) : na
+        A2 := array.size(highsA) > 1 ? array.get(highsA, 1) : na
+        A3 := array.size(highsA) > 2 ? array.get(highsA, 2) : na
+        A4 := array.size(highsA) > 3 ? array.get(highsA, 3) : na
+        A5 := array.size(highsA) > 4 ? array.get(highsA, 4) : na
+        A6 := array.size(highsA) > 5 ? array.get(highsA, 5) : na
+        A7 := array.size(highsA) > 6 ? array.get(highsA, 6) : na
+        A8 := array.size(highsA) > 7 ? array.get(highsA, 7) : na
+
+    // golden-pocket band of the CURRENT trend leg: protected origin
+    // extreme -> running extreme since it. A zone is 'best' when it
+    // overlaps this [fibMin, fibMax] retracement band.
+    float pBandLo = na
+    float pBandHi = na
+    float pProtId = na
+    if needView and trendI == -1 and not na(hiPrice) and not na(hiIdx)
+        legHigh = hiPrice
+        legLow = 1.0e18
+        for k = hiIdx to array.size(aL) - 1
+            legLow := math.min(legLow, array.get(aL, k))
+        rng = legHigh - legLow
+        if rng > 0 and legLow < 1.0e17
+            pBandLo := legLow + fibMin * rng
+            pBandHi := legLow + fibMax * rng
+            pProtId := hiIdx
+    if needView and trendI == 1 and not na(loPrice) and not na(loIdx)
+        legLo2 = loPrice
+        legHi2 = -1.0e18
+        for k = loIdx to array.size(aH) - 1
+            legHi2 := math.max(legHi2, array.get(aH, k))
+        rng2 = legHi2 - legLo2
+        if rng2 > 0 and legHi2 > -1.0e17
+            pBandLo := legHi2 - fibMax * rng2
+            pBandHi := legHi2 - fibMin * rng2
+            pProtId := loIdx
+
+    prot = trendI == 1 ? loPrice : trendI == -1 ? hiPrice : na
+    [evC, evU, evP, evI, evT1, time, evZhi, evZlo, evZot, trendI, prot, pBandLo, pBandHi, pProtId, s1hi, s1lo, s1fr, s1ot, s2hi, s2lo, s2fr, s2ot, s3hi, s3lo, s3fr, s3ot, s4hi, s4lo, s4fr, s4ot, d1hi, d1lo, d1fr, d1ot, d2hi, d2lo, d2fr, d2ot, d3hi, d3lo, d3fr, d3ot, d4hi, d4lo, d4fr, d4ot, L1, L2, L3, L4, L5, L6, L7, L8, A1, A2, A3, A4, A5, A6, A7, A8]
+
+// confirmed-bar wrapper: [1] + lookahead_on = state as of the last COMPLETED
+// higher-TF bar on every chart bar — no repaint, no look-ahead
+f_conf() =>
+    [eC, eU, eP, eI, eT1, eTb, eZh, eZl, eZo, tI, pr, bL, bH, bP, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(true)
+    [tI[1], bL[1], bH[1], bP[1], q1[1], q2[1], q3[1], q4[1], q5[1], q6[1], q7[1], q8[1], q9[1], q10[1], q11[1], q12[1], q13[1], q14[1], q15[1], q16[1], q17[1], q18[1], q19[1], q20[1], q21[1], q22[1], q23[1], q24[1], q25[1], q26[1], q27[1], q28[1], q29[1], q30[1], q31[1], q32[1], w1[1], w2[1], w3[1], w4[1], w5[1], w6[1], w7[1], w8[1], w9[1], w10[1], w11[1], w12[1], w13[1], w14[1], w15[1], w16[1]]
+
+// confirmed break events of the selected lines timeframe
+f_lines() =>
+    [eC, eU, eP, eI, eT1, eTb, eZh, eZl, eZo, tI, pr, bL, bH, bP, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12, w13, w14, w15, w16] = f_engine(false)
+    [eC[1], eU[1], eP[1], eT1[1], eTb[1]]
+
+// ── Engine instances: chart (trigger), zone TF, target TF ───────────────────
+[evCode, evUp, evPrice, evI1, evT1c, evTbc, evZhi, evZlo, evZot, m15Trend, m15Prot, cb1, cb2, cb3, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23, c24, c25, c26, c27, c28, c29, c30, c31, c32, c33, c34, c35, c36, c37, c38, c39, c40, c41, c42, c43, c44, c45, c46, c47, c48] = f_engine(false)
+
+[zTrend, zBandLo, zBandHi, zPidx, zs1hi, zs1lo, zs1fr, zs1ot, zs2hi, zs2lo, zs2fr, zs2ot, zs3hi, zs3lo, zs3fr, zs3ot, zs4hi, zs4lo, zs4fr, zs4ot, zd1hi, zd1lo, zd1fr, zd1ot, zd2hi, zd2lo, zd2fr, zd2ot, zd3hi, zd3lo, zd3fr, zd3ot, zd4hi, zd4lo, zd4fr, zd4ot, zl1, zl2, zl3, zl4, zl5, zl6, zl7, zl8, zh1, zh2, zh3, zh4, zh5, zh6, zh7, zh8] = request.security(syminfo.tickerid, tfZone, f_conf(), lookahead = barmerge.lookahead_on)
+
+[dTrend, dv0a, dv0b, dv0c, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, tl1, tl2, tl3, tl4, tl5, tl6, tl7, tl8, th1, th2, th3, th4, th5, th6, th7, th8] = request.security(syminfo.tickerid, tfTgt, f_conf(), lookahead = barmerge.lookahead_on)
+
+[lnC, lnU, lnP, lnT1, lnTb] = request.security(syminfo.tickerid, tfLines, f_lines(), lookahead = barmerge.lookahead_on)
+
+zTrendS = nz(zTrend, 0)
+dTrendS = nz(dTrend, 0)
+
+// zone slots as arrays: 0-3 supply, 4-7 demand
+gSlotHi = array.new<float>()
+gSlotLo = array.new<float>()
+gSlotFr = array.new<float>()
+gSlotOt = array.new<float>()
+array.push(gSlotHi, zs1hi)
+array.push(gSlotLo, zs1lo)
+array.push(gSlotFr, zs1fr)
+array.push(gSlotOt, zs1ot)
+array.push(gSlotHi, zs2hi)
+array.push(gSlotLo, zs2lo)
+array.push(gSlotFr, zs2fr)
+array.push(gSlotOt, zs2ot)
+array.push(gSlotHi, zs3hi)
+array.push(gSlotLo, zs3lo)
+array.push(gSlotFr, zs3fr)
+array.push(gSlotOt, zs3ot)
+array.push(gSlotHi, zs4hi)
+array.push(gSlotLo, zs4lo)
+array.push(gSlotFr, zs4fr)
+array.push(gSlotOt, zs4ot)
+array.push(gSlotHi, zd1hi)
+array.push(gSlotLo, zd1lo)
+array.push(gSlotFr, zd1fr)
+array.push(gSlotOt, zd1ot)
+array.push(gSlotHi, zd2hi)
+array.push(gSlotLo, zd2lo)
+array.push(gSlotFr, zd2fr)
+array.push(gSlotOt, zd2ot)
+array.push(gSlotHi, zd3hi)
+array.push(gSlotLo, zd3lo)
+array.push(gSlotFr, zd3fr)
+array.push(gSlotOt, zd3ot)
+array.push(gSlotHi, zd4hi)
+array.push(gSlotLo, zd4lo)
+array.push(gSlotFr, zd4fr)
+array.push(gSlotOt, zd4ot)
+
+// ── Chart-side state: armed zones, consumed zones, active signal ────────────
+var armHi = array.new<float>()
+var armLo = array.new<float>()
+var armBull = array.new<bool>()
+var armOt = array.new<float>()
+var armAt = array.new<int>()
+var consumed = array.new<float>()
+var legKey = array.new<float>()
+var legBar = array.new<int>()
+var int lastZTrend = 0
+var bool posActive = false
+var bool posLong = false
+var float posSl = na
+var float posTp = na
+var int sigCount = 0
+var int cntTrig = 0
+var int cntTrigNoZone = 0
+var int cntArmEvents = 0
+var int cntSlBlock = 0
+var int cntRrBlock = 0
+var int cntFibBlock = 0
+var fibRejSeen = array.new<float>()
+var gQual = array.new<float>()
+
+sigLong = false
+sigShort = false
+float sigSl = na
+float sigTp = na
+float sigZoneHi = na
+float sigZoneLo = na
+float sigZoneOt = na
+float sigRR = na
+
+if barstate.isconfirmed
+    // zone quality: 1.0 when the zone overlaps the golden-pocket band of
+    // the current higher-TF trend leg (computed in the zone-TF context)
+    array.clear(gQual)
+    for fi = 0 to 7
+        float q = na
+        fzh = array.get(gSlotHi, fi)
+        if not na(fzh)
+            q := 0.0
+            if not na(zBandLo)
+                if array.get(gSlotLo, fi) <= zBandHi and fzh >= zBandLo
+                    q := 1.0
+        array.push(gQual, q)
+
+    // 0. resolve the active signal with this bar
+    if posActive
+        if posLong ? low <= posSl : high >= posSl
+            posActive := false
+        else if posLong ? high >= posTp : low <= posTp
+            posActive := false
+
+    // 1. zone-TF trend change clears armed/consumed state
+    if zTrendS != lastZTrend
+        if closeFlip and posActive and posLong != (zTrendS == 1)
+            posActive := false
+        array.clear(armHi)
+        array.clear(armLo)
+        array.clear(armBull)
+        array.clear(armOt)
+        array.clear(armAt)
+        array.clear(consumed)
+        array.clear(legKey)
+        array.clear(legBar)
+        lastZTrend := zTrendS
+
+    if zTrendS != 0
+        wantLong = zTrendS == 1
+
+        // 2. expire / invalidate armed zones
+        ai = array.size(armHi) - 1
+        while ai >= 0
+            expired = bar_index - array.get(armAt, ai) > expiryBars
+            invalid = array.get(armBull, ai) ? close < array.get(armLo, ai) : close > array.get(armHi, ai)
+            if expired or invalid
+                array.remove(armHi, ai)
+                array.remove(armLo, ai)
+                array.remove(armBull, ai)
+                array.remove(armOt, ai)
+                array.remove(armAt, ai)
+            ai -= 1
+
+        // 3. arm trend-side fresh zones the completed bar touched
+        for si = 0 to 7
+            zh = array.get(gSlotHi, si)
+            zl = array.get(gSlotLo, si)
+            zbull = si >= 4
+            if not na(zh) and zbull == wantLong
+                if not (useFresh and array.get(gSlotFr, si) < 1)
+                    zot = array.get(gSlotOt, si)
+                    if not array.includes(consumed, zot)
+                        touched = zbull ? low <= zh and close >= zl : high >= zl and close <= zh
+                        fibOk = not useFib or nz(array.get(gQual, si), 0) >= 1
+                        if touched and not fibOk
+                            fkey2 = zot + (zbull ? 1 : 0)
+                            if not array.includes(fibRejSeen, fkey2)
+                                array.push(fibRejSeen, fkey2)
+                                cntFibBlock += 1
+                        if touched and fibOk
+                            ei = array.indexof(armOt, zot)
+                            if ei >= 0
+                                array.set(armAt, ei, bar_index)
+                            else
+                                array.push(armHi, zh)
+                                array.push(armLo, zl)
+                                array.push(armBull, zbull)
+                                array.push(armOt, zot)
+                                array.push(armAt, bar_index)
+                                cntArmEvents += 1
+
+        // 3b. the golden-pocket band of the CURRENT leg is itself armable:
+        // the reference charts enter on the pullback into the 0.60-0.79
+        // region. The visit often happens before the break that defines the
+        // leg registers, so the touch is searched retroactively against
+        // today's band; one trade per band VISIT (a new touch re-arms).
+        if useFib and not na(zBandLo) and not na(zPidx)
+            bkey = -1.0 - zPidx
+            int tb = -1
+            for k = 0 to expiryBars
+                if tb < 0
+                    bt = wantLong ? low[k] <= zBandHi and close[k] >= zBandLo : high[k] >= zBandLo and close[k] <= zBandHi
+                    if bt
+                        tb := bar_index - k
+            li = array.indexof(legKey, bkey)
+            if tb >= 0 and li >= 0
+                if tb <= array.get(legBar, li)
+                    tb := -1
+            if tb >= 0
+                ei3 = array.indexof(armOt, bkey)
+                if ei3 >= 0
+                    array.set(armAt, ei3, math.max(array.get(armAt, ei3), tb))
+                else
+                    array.push(armHi, zBandHi)
+                    array.push(armLo, zBandLo)
+                    array.push(armBull, wantLong)
+                    array.push(armOt, bkey)
+                    array.push(armAt, tb)
+                    cntArmEvents += 1
+
+        // 4. trigger: chart-TF ChoCh/BOS in the zone-TF trend direction
+        trigOk = evCode == 1 or (evCode == 2 and trigOpt == "ChoCh or BOS")
+        dirOk = dirOpt == "Both" or (dirOpt == "Long") == wantLong
+        alignOk = not useD1 or dTrendS == zTrendS
+        if trigOk and evUp == (wantLong ? 1 : 0)
+            cntTrig += 1
+            // most recently armed matching zone (zone gate first — cBot order)
+            best = -1
+            bestAt = -1
+            if array.size(armHi) > 0
+                for k = 0 to array.size(armHi) - 1
+                    if array.get(armBull, k) == wantLong and array.get(armAt, k) > bestAt
+                        best := k
+                        bestAt := array.get(armAt, k)
+            if best < 0
+                cntTrigNoZone += 1
+            if best >= 0 and bar_index - bestAt > trigWithin
+                best := -1
+            if best >= 0 and dirOk and alignOk and not (onePos and posActive)
+                entry = close
+                azh = array.get(armHi, best)
+                azl = array.get(armLo, best)
+                // SL: M15 protected swing of the trigger break, zone edge fallback
+                anchorOk = m15Trend == (wantLong ? 1 : -1) and not na(m15Prot) and (wantLong ? nz(m15Prot, 1.0e18) < entry : nz(m15Prot, -1.0e18) > entry)
+                slAnchor = anchorOk ? m15Prot : wantLong ? azl : azh
+                slUsd = wantLong ? entry - (slAnchor - slBuf) : (slAnchor + slBuf) - entry
+                slUsd := math.max(slUsd, minSl)
+                if slUsd > maxSl
+                    cntSlBlock += 1
+                if slUsd <= maxSl
+                    // TP: nearest unswept swing beyond price clearing MinRR
+                    cand = array.new<float>()
+                    if wantLong
+                        for p in array.from(zh1, zh2, zh3, zh4, zh5, zh6, zh7, zh8, th1, th2, th3, th4, th5, th6, th7, th8)
+                            if not na(p)
+                                if p > entry
+                                    array.push(cand, p)
+                        array.sort(cand, order.ascending)
+                    else
+                        for p in array.from(zl1, zl2, zl3, zl4, zl5, zl6, zl7, zl8, tl1, tl2, tl3, tl4, tl5, tl6, tl7, tl8)
+                            if not na(p)
+                                if p < entry
+                                    array.push(cand, p)
+                        array.sort(cand, order.descending)
+                    float tpPick = na
+                    if array.size(cand) > 0
+                        for k = 0 to array.size(cand) - 1
+                            if na(tpPick)
+                                tp = wantLong ? array.get(cand, k) - tgtOff : array.get(cand, k) + tgtOff
+                                reward = wantLong ? tp - entry : entry - tp
+                                if reward > 0 and reward / slUsd >= minRR
+                                    tpPick := tp
+                    if na(tpPick)
+                        cntRrBlock += 1
+                    if not na(tpPick)
+                        sigLong := wantLong
+                        sigShort := not wantLong
+                        sigSl := wantLong ? entry - slUsd : entry + slUsd
+                        sigTp := tpPick
+                        sigRR := (wantLong ? tpPick - entry : entry - tpPick) / slUsd
+                        sigZoneHi := azh
+                        sigZoneLo := azl
+                        sigZoneOt := array.get(armOt, best)
+                        sigCount += 1
+                        posActive := true
+                        posLong := wantLong
+                        posSl := sigSl
+                        posTp := tpPick
+                        okey = array.get(armOt, best)
+                        if okey < 0
+                            li2 = array.indexof(legKey, okey)
+                            if li2 >= 0
+                                array.set(legBar, li2, bar_index)
+                            else
+                                array.push(legKey, okey)
+                                array.push(legBar, bar_index)
+                        else
+                            array.push(consumed, okey)
+                        array.remove(armHi, best)
+                        array.remove(armLo, best)
+                        array.remove(armBull, best)
+                        array.remove(armOt, best)
+                        array.remove(armAt, best)
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+armedNow = array.size(armHi)
+bgcolor(showDiag and armedNow > 0 ? color.new(color.yellow, 90) : na, title = "Armed zone window")
+
+// break-of-structure lines of the SELECTED timeframe: broken swing level ->
+// break bar (green up / red down), "ChoCh" tagged, bos untagged. One line
+// per break (deduped on the break bar's time).
+var float lastLineTb = na
+if showDiag and barstate.isconfirmed and nz(lnC) > 0 and not na(lnT1)
+    if na(lastLineTb) or lnTb != lastLineTb
+        lastLineTb := lnTb
+        lcol = nz(lnU) == 1 ? COL_DEMAND : COL_SUPPLY
+        isHtf = tfLines != "" and tfLines != timeframe.period
+        line.new(math.round(lnT1), lnP, math.round(lnTb), lnP, xloc = xloc.bar_time, color = color.new(lcol, isHtf ? 15 : 25), width = isHtf ? 2 : 1)
+        if nz(lnC) == 1
+            label.new(math.round(math.avg(lnT1, lnTb)), lnP, isHtf ? "ChoCh " + tfLines : "ChoCh", xloc = xloc.bar_time, style = label.style_none, textcolor = color.new(lcol, 10), size = size.small)
+plotshape(sigLong, "Long signal", style = shape.triangleup, location = location.belowbar, color = COL_DEMAND, size = size.small)
+plotshape(sigShort, "Short signal", style = shape.triangledown, location = location.abovebar, color = COL_SUPPLY, size = size.small)
+
+if showTrade and (sigLong or sigShort)
+    if sigZoneOt > 0
+        box.new(left = math.round(sigZoneOt), top = sigZoneHi, right = time, bottom = sigZoneLo, xloc = xloc.bar_time, bgcolor = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 80), border_color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 40))
+    txt = (sigLong ? "LONG " : "SHORT ") + str.tostring(close, format.mintick) + "\nSL " + str.tostring(sigSl, format.mintick) + " · TP " + str.tostring(sigTp, format.mintick) + "\nRR " + str.tostring(sigRR, "#.##")
+    label.new(bar_index, sigLong ? low : high, txt, style = sigLong ? label.style_label_up : label.style_label_down, color = color.new(sigLong ? COL_DEMAND : COL_SUPPLY, 20), textcolor = color.white, size = size.small)
+
+// chart-TF order blocks: the zone stamped at the origin of every chart-TF
+// structure break — after a break, price tends to return to this block.
+// Box appears at the break, extends right while alive, freezes when a body
+// closes through its far side (invalidated).
+var cobBox = array.new<box>()
+var cobHi = array.new<float>()
+var cobLo = array.new<float>()
+var cobBull = array.new<bool>()
+if showChartOB and barstate.isconfirmed
+    ci = array.size(cobBox) - 1
+    while ci >= 0
+        cbull = array.get(cobBull, ci)
+        dead = cbull ? close < array.get(cobLo, ci) : close > array.get(cobHi, ci)
+        if dead
+            array.remove(cobBox, ci)
+            array.remove(cobHi, ci)
+            array.remove(cobLo, ci)
+            array.remove(cobBull, ci)
+        else
+            box.set_right(array.get(cobBox, ci), time)
+        ci -= 1
+    if evCode > 0 and not na(evZhi)
+        cBull = evUp == 1
+        cc = cBull ? COL_DEMAND : COL_SUPPLY
+        cbx = box.new(left = math.round(evZot), top = evZhi, right = time, bottom = evZlo, xloc = xloc.bar_time, bgcolor = color.new(cc, 86), border_color = color.new(cc, 45))
+        array.push(cobBox, cbx)
+        array.push(cobHi, evZhi)
+        array.push(cobLo, evZlo)
+        array.push(cobBull, cBull)
+
+// order-block boxes: created when a zone first appears in the higher-TF
+// view, extended and re-tinted while it lives, frozen when it dies
+var obKey = array.new<float>()
+var obBox = array.new<box>()
+if showZones and barstate.isconfirmed
+    for si = 0 to 7
+        zh = array.get(gSlotHi, si)
+        if not na(zh)
+            zl = array.get(gSlotLo, si)
+            fr = array.get(gSlotFr, si)
+            ot = array.get(gSlotOt, si)
+            zbull = si >= 4
+            baseC = zbull ? COL_DEMAND : COL_SUPPLY
+            alpha = fr >= 2 ? 70 : fr >= 1 ? 80 : 92
+            key = ot + (zbull ? 1 : 0)
+            bi = array.indexof(obKey, key)
+            qual = nz(array.get(gQual, si), 0) >= 1
+            bc = qual ? color.new(COL_GOLD, 15) : color.new(baseC, 55)
+            btxt = (fr >= 1 ? "fresh" : "") + (qual ? " ★0.68" : "")
+            btc = qual ? color.new(COL_GOLD, 10) : color.new(baseC, 25)
+            if bi >= 0
+                bx = array.get(obBox, bi)
+                box.set_right(bx, time)
+                box.set_top(bx, zh)
+                box.set_bottom(bx, zl)
+                box.set_bgcolor(bx, color.new(baseC, alpha))
+                box.set_border_color(bx, bc)
+                box.set_text(bx, btxt)
+                box.set_text_color(bx, btc)
+            else
+                bx = box.new(left = math.round(ot), top = zh, right = time, bottom = zl, xloc = xloc.bar_time, bgcolor = color.new(baseC, alpha), border_color = bc, text = btxt, text_color = btc, text_size = size.tiny)
+                array.push(obKey, key)
+                array.push(obBox, bx)
+
+// golden-pocket band of the current zone-TF leg (gold dotted lines)
+var line bandLn1 = na
+var line bandLn2 = na
+if showZones and barstate.islast
+    if not na(bandLn1)
+        line.delete(bandLn1)
+        bandLn1 := na
+    if not na(bandLn2)
+        line.delete(bandLn2)
+        bandLn2 := na
+    if not na(zBandLo)
+        bandLn1 := line.new(bar_index - 60, zBandLo, bar_index, zBandLo, color = color.new(COL_GOLD, 30), style = line.style_dotted, width = 1)
+        bandLn2 := line.new(bar_index - 60, zBandHi, bar_index, zBandHi, color = color.new(COL_GOLD, 30), style = line.style_dotted, width = 1)
+
+// liquidity level ladder: the unswept swing lows/highs of the zone and
+// target timeframes — the "H4"/"D" tagged lines of the reference charts.
+// Lows below price are downside targets, highs above are upside targets;
+// a level disappears from the ladder the bar after price sweeps it.
+var lvlLines = array.new<line>()
+var lvlLabels = array.new<label>()
+if showLevels and barstate.islast
+    if array.size(lvlLines) > 0
+        for lnx in lvlLines
+            line.delete(lnx)
+        array.clear(lvlLines)
+    if array.size(lvlLabels) > 0
+        for lbx in lvlLabels
+            label.delete(lbx)
+        array.clear(lvlLabels)
+    lvPrices = array.from(zl1, zl2, zl3, tl1, tl2, zh1, zh2, th1, th2)
+    lvTags = array.from("H4", "H4", "H4", "D", "D", "H4", "H4", "D", "D")
+    for li = 0 to 8
+        lp = array.get(lvPrices, li)
+        if not na(lp)
+            isD = li == 3 or li == 4 or li == 7 or li == 8
+            lcl = lp < close ? color.new(#60A5FA, 30) : color.new(COL_SUPPLY, 30)
+            lline = line.new(bar_index - 90, lp, bar_index + 5, lp, color = lcl, width = isD ? 2 : 1, style = isD ? line.style_solid : line.style_dashed)
+            llab = label.new(bar_index + 6, lp, array.get(lvTags, li) + " " + str.tostring(lp, format.mintick), style = label.style_label_left, color = color.new(color.black, 60), textcolor = lcl, size = size.small)
+            array.push(lvlLines, lline)
+            array.push(lvlLabels, llab)
+
+// ── Status table (the cBot's [GATE] diagnostics, on-chart) ──────────────────
+var table info = table.new(position.top_right, 2, 11, bgcolor = color.new(color.black, 40))
+if barstate.islast
+    table.cell(info, 0, 0, "H4 trend", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 0, zTrendS == 1 ? "BULL" : zTrendS == -1 ? "BEAR" : "—", text_color = zTrendS == 1 ? COL_DEMAND : zTrendS == -1 ? COL_SUPPLY : color.gray, text_size = size.small)
+    table.cell(info, 0, 1, "D1 trend", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 1, dTrendS == 1 ? "BULL" : dTrendS == -1 ? "BEAR" : "—", text_color = dTrendS == 1 ? COL_DEMAND : dTrendS == -1 ? COL_SUPPLY : color.gray, text_size = size.small)
+    table.cell(info, 0, 2, "Armed zones", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 2, str.tostring(array.size(armHi)), text_color = color.white, text_size = size.small)
+    freshSup = (nz(zs1fr) >= 1 ? 1 : 0) + (nz(zs2fr) >= 1 ? 1 : 0) + (nz(zs3fr) >= 1 ? 1 : 0) + (nz(zs4fr) >= 1 ? 1 : 0)
+    freshDem = (nz(zd1fr) >= 1 ? 1 : 0) + (nz(zd2fr) >= 1 ? 1 : 0) + (nz(zd3fr) >= 1 ? 1 : 0) + (nz(zd4fr) >= 1 ? 1 : 0)
+    table.cell(info, 0, 3, "Fresh S / D zones", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 3, str.tostring(freshSup) + " / " + str.tostring(freshDem), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 4, "Zone touches armed", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 4, str.tostring(cntArmEvents), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 5, "M15 triggers (trend dir)", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 5, str.tostring(cntTrig), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 6, "Triggers w/o armed zone", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 6, str.tostring(cntTrigNoZone), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 7, "Blocked: SL > max", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 7, str.tostring(cntSlBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 8, "Blocked: no target ≥ minRR", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 8, str.tostring(cntRrBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 9, "Zones blocked by fib", text_color = color.gray, text_size = size.small)
+    table.cell(info, 1, 9, str.tostring(cntFibBlock), text_color = color.white, text_size = size.small)
+    table.cell(info, 0, 10, "SIGNALS", text_color = color.yellow, text_size = size.small)
+    table.cell(info, 1, 10, str.tostring(sigCount), text_color = color.yellow, text_size = size.small)
+
+alertcondition(sigLong, "ZoneStructure LONG", "ZoneStructure: LONG signal (H4 demand zone + M15 ChoCh up)")
+alertcondition(sigShort, "ZoneStructure SHORT", "ZoneStructure: SHORT signal (H4 supply zone + M15 ChoCh down)")

@@ -1,0 +1,173 @@
+//@version=6
+// ─── LONDON PRE-FIX RANGE BREAKOUT STRATEGY v1.0 ─────────────────────────────────────
+// The three-step session play:
+//
+//   Step 1  Mark the high and low of the 09:30–10:30 London pre-fix range
+//           (session window and timezone are inputs).
+//   Step 2  After 10:30, wait for a 15-MINUTE candle to CLOSE outside the
+//           range (confirmed M15 closes via security — exact on any chart
+//           at/below M15).
+//   Step 3  Enter in the breakout direction:
+//               stop   inside the range (midpoint by default, or the
+//                      opposite side of the range)
+//               target 1.5 × the range width from entry (multiplier input)
+//
+//   • The range draws as a box extended through the day; entry / SL / TP
+//     lines run until the target or stop is hit (✓ / ✗ marks the outcome)
+//     or the day ends. One trade per day by default, long or short —
+//     whichever side closes out first. Alerts for both directions.
+//   • Chart on M15 or below (M15 recommended).
+//   • Strategy Tester: market entry on the breakout signal, exit bracket at
+//     the SL/TP shown, and any position still open at day end is closed.
+strategy("London Pre-Fix Range Breakout", "LDN Range Strat", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100, initial_capital = 10000, default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0, calc_on_every_tick = false)
+
+sess    = input.session("0930-1030", "Range window")
+tz      = input.string("Europe/London", "Timezone")
+rrMult  = input.float(1.5, "Target (× range width)", minval = 0.1, step = 0.1)
+stopMid = input.bool(true, "Stop at range midpoint (off = opposite side)")
+oneTrade = input.bool(true, "One trade per day")
+
+colRange = input.color(#94A3B8, "Range box", group = "Colors")
+colUp    = input.color(#4ADE80, "Long breakout", group = "Colors")
+colDn    = input.color(#FB7185, "Short breakout", group = "Colors")
+
+// confirmed M15 closes (falls back to the chart TF above M15)
+m15tf = timeframe.in_seconds(timeframe.period) <= 900 ? "15" : timeframe.period
+[c15, t15] = request.security(syminfo.tickerid, m15tf, [close[1], time[1]], lookahead = barmerge.lookahead_on)
+var float last15 = na
+
+inSess = not na(time(timeframe.period, sess, tz))
+newSess = inSess and not inSess[1]
+
+var float rHi = na
+var float rLo = na
+var bool rangeDone = false
+var bool traded = false
+var int sessDay = na
+var box rBox = na
+
+// active trade
+var int dir = 0
+var float enP = na
+var float slP = na
+var float tpP = na
+var line enLn = na
+var line slLn = na
+var line tpLn = na
+
+// history caps
+var oldBoxes = array.new<box>()
+var oldLines = array.new<line>()
+var oldLbls = array.new<label>()
+f_keep(bx, ln1, ln2, ln3) =>
+    if not na(bx)
+        array.push(oldBoxes, bx)
+        while array.size(oldBoxes) > 15
+            box.delete(array.get(oldBoxes, 0))
+            array.remove(oldBoxes, 0)
+    if not na(ln1)
+        array.push(oldLines, ln1)
+    if not na(ln2)
+        array.push(oldLines, ln2)
+    if not na(ln3)
+        array.push(oldLines, ln3)
+    while array.size(oldLines) > 45
+        line.delete(array.get(oldLines, 0))
+        array.remove(oldLines, 0)
+
+f_lbl(l) =>
+    array.push(oldLbls, l)
+    while array.size(oldLbls) > 40
+        label.delete(array.get(oldLbls, 0))
+        array.remove(oldLbls, 0)
+
+longSig = false
+shortSig = false
+
+if barstate.isconfirmed
+    // ── Step 1: build the pre-fix range ─────────────────────────────────────
+    if newSess
+        // archive yesterday's drawings, reset the day
+        f_keep(rBox, enLn, slLn, tpLn)
+        enLn := line(na)
+        slLn := line(na)
+        tpLn := line(na)
+        dir := 0
+        rHi := high
+        rLo := low
+        rangeDone := false
+        traded := false
+        sessDay := dayofmonth(time, tz)
+        rBox := box.new(time, high, time, low, xloc = xloc.bar_time, bgcolor = color.new(colRange, 85), border_color = color.new(colRange, 40))
+    else if inSess and not na(rHi)
+        rHi := math.max(rHi, high)
+        rLo := math.min(rLo, low)
+        box.set_top(rBox, rHi)
+        box.set_bottom(rBox, rLo)
+        box.set_right(rBox, time)
+    else if not inSess and inSess[1] and not na(rHi)
+        rangeDone := true
+
+    // extend the finished range box through its day
+    if rangeDone and not na(rBox) and dayofmonth(time, tz) == sessDay
+        box.set_right(rBox, time)
+
+    // ── Step 2: a confirmed 15m close outside the range, same day ───────────
+    new15 = not na(t15) and (na(last15) or t15 != last15)
+    if new15
+        last15 := t15
+    canTrade = rangeDone and dir == 0 and not (oneTrade and traded) and dayofmonth(time, tz) == sessDay
+    if canTrade and new15
+        rng = rHi - rLo
+        if c15 > rHi
+            // ── Step 3: long breakout ───────────────────────────────────────
+            dir := 1
+            traded := true
+            enP := c15
+            slP := stopMid ? (rHi + rLo) / 2 : rLo
+            tpP := enP + rrMult * rng
+            longSig := true
+        else if c15 < rLo
+            dir := -1
+            traded := true
+            enP := c15
+            slP := stopMid ? (rHi + rLo) / 2 : rHi
+            tpP := enP - rrMult * rng
+            shortSig := true
+        if dir != 0
+            c = dir == 1 ? colUp : colDn
+            f_lbl(label.new(time, enP, (dir == 1 ? "LONG" : "SHORT") + "  tp " + str.tostring(tpP, format.mintick) + "  sl " + str.tostring(slP, format.mintick), xloc = xloc.bar_time, style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.new(c, 15), textcolor = color.black, size = size.small))
+            enLn := line.new(time, enP, time, enP, xloc = xloc.bar_time, color = color.new(color.gray, 20), width = 1)
+            slLn := line.new(time, slP, time, slP, xloc = xloc.bar_time, color = color.new(colDn, 20), style = line.style_dotted, width = 2)
+            tpLn := line.new(time, tpP, time, tpP, xloc = xloc.bar_time, color = color.new(colUp, 20), style = line.style_dotted, width = 2)
+
+    // ── manage the open trade lines until TP/SL or day end ──────────────────
+    if dir != 0
+        line.set_x2(enLn, time)
+        line.set_x2(slLn, time)
+        line.set_x2(tpLn, time)
+        hitTp = dir == 1 ? high >= tpP : low <= tpP
+        hitSl = dir == 1 ? low <= slP : high >= slP
+        if hitSl
+            f_lbl(label.new(time, slP, "✗", xloc = xloc.bar_time, style = label.style_label_up, color = color.new(color.black, 100), textcolor = colDn, size = size.normal))
+            dir := 0
+        else if hitTp
+            f_lbl(label.new(time, tpP, "✓", xloc = xloc.bar_time, style = label.style_label_down, color = color.new(color.black, 100), textcolor = colUp, size = size.normal))
+            dir := 0
+        else if dayofmonth(time, tz) != sessDay
+            dir := 0
+
+alertcondition(longSig, "LDN Range LONG", "15m close above the 09:30-10:30 pre-fix range — long, target 1.5x range")
+alertcondition(shortSig, "LDN Range SHORT", "15m close below the 09:30-10:30 pre-fix range — short, target 1.5x range")
+
+// ── order management ────────────────────────────────────────────────────────
+if longSig
+    strategy.entry("Long", strategy.long)
+    strategy.exit("LongX", "Long", stop = slP, limit = tpP)
+if shortSig
+    strategy.entry("Short", strategy.short)
+    strategy.exit("ShortX", "Short", stop = slP, limit = tpP)
+
+// flat by day end
+if strategy.position_size != 0 and dayofmonth(time, tz) != sessDay
+    strategy.close_all(comment = "day end")

@@ -1,0 +1,185 @@
+//@version=6
+// ─── A / V LEVELS v1.7 ──────────────────────────────────────────────────────
+// Marks the A-tops and V-bottoms of the CLOSING-PRICE line as levels:
+//
+//   • An "A" is a closing-price peak (line rises into it and falls away),
+//     a "V" is a closing-price trough — detected with a configurable
+//     strength (bars each side, default 1 = the sharpest pure A/V shape).
+//   • Optional sharpness filter: both legs of the A/V must move at least
+//     N × ATR(14) in closes — filters shallow wiggles, 0 = off.
+//   • Each A/V puts a level line at its closing price, labeled "A" or "V"
+//     at the pivot. The line waits for price to LEAVE the level first (one
+//     full bar clear of it — wick noise around the pivot never kills it),
+//     then extends right until price RETURNS to it:
+//         return candle CLOSES through  → line ends there as a solid BOS
+//                                         line (blue by default)
+//         return is a WICK only         → line ends as a RED DASHED line
+//                                         (liquidity sweep); if a candle
+//                                         closes through within the upgrade
+//                                         window the dash becomes the BOS
+//                                         line after all
+//     A level price closes through before ever leaving ends as a BOS line
+//     right there — levels are never silently discarded.
+//   • Directional levels (default on): while the market is going UP only
+//     the V lows are marked, going DOWN only the A highs — the trend is the
+//     direction of the last closure break (closing through an A = up,
+//     through a V = down). Toggle off to mark both sides always.
+//   • Market structure: a zigzag connects the closing-price swings (the
+//     A/V pivots) in sequence — the line chart's structure drawn on the
+//     candle chart, color/width configurable.
+//   • "Keep only last A and last V" replaces older untaken levels of the
+//     same kind for a clean chart; broken/swept lines stay as history and
+//     age out via the max-kept setting.
+indicator("A/V Levels", "AVLevels", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+k       = input.int(1, "Strength (bars each side)", minval = 1)
+minAtr  = input.float(0.0, "Min leg size (ATR mult, 0 = off)", minval = 0, step = 0.1)
+dirOnly = input.bool(true, "Up marks lows, down marks highs")
+showStruct = input.bool(true, "Market structure zigzag (closing price)")
+onlyLast = input.bool(false, "Keep only last A and last V")
+maxKeep = input.int(40, "Max levels kept per side")
+upWin   = input.int(6, "Sweep-to-BOS upgrade window (bars)", minval = 1)
+
+colA    = input.color(#FB7185, "A level", group = "Colors")
+colV    = input.color(#4ADE80, "V level", group = "Colors")
+colBos  = input.color(#60A5FA, "BOS — broken level line", group = "Colors")
+colSweep = input.color(color.red, "Swept — dashed line", group = "Colors")
+colTxt  = input.color(color.white, "Label text", group = "Colors")
+colStruct = input.color(#1A1A1A, "Structure zigzag", group = "Colors")
+
+atr = ta.atr(14)
+pa = ta.pivothigh(close, k, k)
+pv = ta.pivotlow(close, k, k)
+
+var lvP  = array.new<float>()
+var lvIsV = array.new<bool>()
+var lvSt = array.new<int>()        // 0 live, 2 broken, 3 swept
+var lvLn = array.new<line>()
+var lvLb = array.new<label>()
+var lvLeft = array.new<bool>()     // price has left the level (armed)
+var lvSwpB = array.new<int>()      // bar_index of the sweep (upgrade window)
+
+// trend = direction of the last closure break (1 up, -1 down)
+var int trendDir = 0
+
+// closing-price market structure: last swing point + zigzag segments
+var zzS = array.new<float>(2, na)  // [lastSwingT, lastSwingP]
+var zz = array.new<line>()
+
+// replace older untaken levels of the same kind (clean-chart mode)
+f_dropLive(isV) =>
+    if array.size(lvP) > 0
+        for j = array.size(lvP) - 1 to 0
+            if array.get(lvSt, j) == 0 and array.get(lvIsV, j) == isV
+                line.delete(array.get(lvLn, j))
+                label.delete(array.get(lvLb, j))
+                array.remove(lvP, j)
+                array.remove(lvIsV, j)
+                array.remove(lvSt, j)
+                array.remove(lvLn, j)
+                array.remove(lvLb, j)
+                array.remove(lvLeft, j)
+                array.remove(lvSwpB, j)
+
+// every confirmed pivot extends the structure zigzag, level or not
+f_zz(p, pT) =>
+    if showStruct
+        if not na(array.get(zzS, 0))
+            array.push(zz, line.new(math.round(array.get(zzS, 0)), array.get(zzS, 1), math.round(pT), p, xloc = xloc.bar_time, color = colStruct, width = 1))
+        array.set(zzS, 0, pT)
+        array.set(zzS, 1, p)
+        while array.size(zz) > 120
+            line.delete(array.get(zz, 0))
+            array.remove(zz, 0)
+
+f_add(isV, p, pT) =>
+    if onlyLast
+        f_dropLive(isV)
+    col = isV ? colV : colA
+    array.push(lvP, p)
+    array.push(lvIsV, isV)
+    array.push(lvSt, 0)
+    array.push(lvLn, line.new(math.round(pT), p, time, p, xloc = xloc.bar_time, color = color.new(col, 20), width = 1))
+    array.push(lvLb, label.new(math.round(pT), p, isV ? "V" : "A", xloc = xloc.bar_time, style = isV ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = colTxt, size = size.small))
+    array.push(lvLeft, false)
+    array.push(lvSwpB, -1)
+    while array.size(lvP) > 2 * maxKeep
+        // prune the oldest DEAD (broken/swept) level first — live untaken
+        // levels are never dropped for the cap
+        rm = 0
+        if array.get(lvSt, 0) == 0
+            for q = 0 to array.size(lvP) - 1
+                if array.get(lvSt, q) != 0
+                    rm := q
+                    break
+        line.delete(array.get(lvLn, rm))
+        label.delete(array.get(lvLb, rm))
+        array.remove(lvP, rm)
+        array.remove(lvIsV, rm)
+        array.remove(lvSt, rm)
+        array.remove(lvLn, rm)
+        array.remove(lvLb, rm)
+        array.remove(lvLeft, rm)
+        array.remove(lvSwpB, rm)
+
+if barstate.isconfirmed
+    // confirmed A: closing-price peak at bar k back
+    if not na(pa)
+        legIn = close[k] - close[2 * k]
+        legOut = close[k] - close
+        if minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(atr, 0)
+            f_zz(close[k], time[k])
+            if not dirOnly or trendDir <= 0
+                f_add(false, close[k], time[k])
+    // confirmed V: closing-price trough at bar k back
+    if not na(pv)
+        legIn = close[2 * k] - close[k]
+        legOut = close - close[k]
+        if minAtr == 0 or math.min(legIn, legOut) >= minAtr * nz(atr, 0)
+            f_zz(close[k], time[k])
+            if not dirOnly or trendDir >= 0
+                f_add(true, close[k], time[k])
+
+    // level lifecycle: the level must first be LEFT (a full bar clear of
+    // it), then it extends until price RETURNS — closure through on the
+    // return = real break, wick-only return = sweep (red dash)
+    if array.size(lvP) > 0
+        for i = 0 to array.size(lvP) - 1
+            if array.get(lvSt, i) == 0
+                p = array.get(lvP, i)
+                isV = array.get(lvIsV, i)
+                ln = array.get(lvLn, i)
+                line.set_x2(ln, time)
+                if not array.get(lvLeft, i)
+                    if isV ? low > p : high < p
+                        array.set(lvLeft, i, true)
+                    else if isV ? close < p : close > p
+                        // closed beyond before ever leaving — still a break:
+                        // end it as a BOS line instead of discarding
+                        trendDir := isV ? -1 : 1
+                        line.set_color(ln, colBos)
+                        line.set_width(ln, 2)
+                        array.set(lvSt, i, 2)
+                else
+                    if isV ? low <= p : high >= p
+                        if isV ? close < p : close > p
+                            trendDir := isV ? -1 : 1
+                            line.set_color(ln, colBos)
+                            line.set_width(ln, 2)
+                            array.set(lvSt, i, 2)
+                        else
+                            line.set_style(ln, line.style_dashed)
+                            line.set_color(ln, colSweep)
+                            array.set(lvSt, i, 3)
+                            array.set(lvSwpB, i, bar_index)
+            else if array.get(lvSt, i) == 3 and bar_index - array.get(lvSwpB, i) <= upWin
+                // a closure through shortly after the sweep is a BOS after all
+                p = array.get(lvP, i)
+                if array.get(lvIsV, i) ? close < p : close > p
+                    trendDir := array.get(lvIsV, i) ? -1 : 1
+                    ln = array.get(lvLn, i)
+                    line.set_x2(ln, time)
+                    line.set_style(ln, line.style_solid)
+                    line.set_color(ln, colBos)
+                    line.set_width(ln, 2)
+                    array.set(lvSt, i, 2)
