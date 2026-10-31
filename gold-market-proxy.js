@@ -2,7 +2,7 @@ const http = require('http');
 const https = require('https');
 
 const PORT = Number(process.env.PORT || 8787);
-const FRED_KEY = process.env.FRED_API_KEY || '4d4ee6e804ae4c3cbe36e3678391f0ae';
+const FRED_KEY = process.env.FRED_API_KEY || '';
 
 const FEEDS = {
   gold: 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1d&interval=1m',
