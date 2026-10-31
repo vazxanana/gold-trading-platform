@@ -1,12 +1,14 @@
 services:
   - type: web
-    name: gold-market-proxy
+    name: gold-trading-platform
     env: node
     plan: free
     buildCommand: npm install
-    startCommand: node gold-market-proxy.js
+    startCommand: node server.js
     envVars:
-      - key: PORT
-        value: 10000
       - key: FRED_API_KEY
-        value: 4d4ee6e804ae4c3cbe36e3678391f0ae
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TWELVEDATA_KEY
+        sync: false
